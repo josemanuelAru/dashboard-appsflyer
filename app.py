@@ -3,168 +3,172 @@ import pandas as pd
 import plotly.express as px
 
 # Configuración de la página
-st.set_page_config(page_title="Comparador Avanzado (PID)", layout="wide")
+st.set_page_config(page_title="Dashboard Separado", layout="wide")
 
-st.title("⚔️ Comparador Detallado: Maquinillo vs Ivane")
-st.markdown("Analiza discrepancias filtrando por PID específico.")
+st.title("📊 Dashboard: Maquinillo & Ivane (Separados)")
+st.markdown("Analiza cada reporte por separado con sus propias gráficas y tablas.")
 
-# --- 1. ZONA DE CARGA ---
-col_up1, col_up2 = st.columns(2)
+# Creamos dos pestañas para separar los análisis
+tab_maq, tab_ivane = st.tabs(["🤖 Reporte Maquinillo", "📋 Reporte Ivane"])
 
-with col_up1:
-    st.subheader("📂 1. Datos del Maquinillo")
-    file_maq = st.file_uploader("Sube CSV Maquinillo", type=["csv"], key="maq")
+# ==========================================
+# PESTAÑA 1: MAQUINILLO (Lógica clásica)
+# ==========================================
+with tab_maq:
+    st.header("Análisis Maquinillo")
+    file_maq = st.file_uploader("Sube CSV Maquinillo", type=["csv"], key="u_maq")
 
-with col_up2:
-    st.subheader("📂 2. Datos de Ivane")
-    file_ivane = st.file_uploader("Sube CSV Ivane", type=["csv"], key="ivane")
-
-# --- LÓGICA DE PROCESAMIENTO ---
-if file_maq and file_ivane:
-    try:
-        # Cargar archivos
-        df_m = pd.read_csv(file_maq)
-        df_i = pd.read_csv(file_ivane)
-        
-        # Limpieza básica de nombres de columnas
-        df_m.columns = df_m.columns.str.strip()
-        df_i.columns = df_i.columns.str.strip()
-
-        st.success(f"✅ Archivos cargados.")
-        st.markdown("---")
-
-        # --- 2. MAPEO DE COLUMNAS (FECHA Y PID) ---
-        st.subheader("⚙️ Configuración de Columnas")
-        st.info("Indica qué columnas usar para Fecha (eje X) y PID (para filtrar).")
-
-        c1, c2 = st.columns(2)
-        
-        # Función auxiliar para buscar columnas por nombre
-        def find_col(df, keywords):
-            found = [c for c in df.columns if any(k in c.lower() for k in keywords)]
-            return df.columns.get_loc(found[0]) if found else 0
-
-        with c1:
-            st.markdown("**Maquinillo**")
-            date_col_m = st.selectbox("Columna Fecha:", df_m.columns, index=find_col(df_m, ['date', 'fecha', 'time']), key="dm")
-            pid_col_m = st.selectbox("Columna PID:", df_m.columns, index=find_col(df_m, ['pid', 'pub', 'id']), key="pm")
-        
-        with c2:
-            st.markdown("**Ivane**")
-            date_col_i = st.selectbox("Columna Fecha:", df_i.columns, index=find_col(df_i, ['date', 'fecha', 'time']), key="di")
-            pid_col_i = st.selectbox("Columna PID:", df_i.columns, index=find_col(df_i, ['pid', 'pub', 'site', 'source']), key="pi")
-
-        # --- 3. FILTRO DE PID (NUEVO) ---
-        st.markdown("---")
-        st.subheader("🔍 Filtro por PID")
-        
-        # Convertir a string para asegurar comparación
-        df_m[pid_col_m] = df_m[pid_col_m].astype(str)
-        df_i[pid_col_i] = df_i[pid_col_i].astype(str)
-
-        # Obtener lista única de PIDs de ambos archivos
-        pids_maq = set(df_m[pid_col_m].unique())
-        pids_ivane = set(df_i[pid_col_i].unique())
-        
-        # Unión de todos los PIDs disponibles
-        all_pids = sorted(list(pids_maq.union(pids_ivane)))
-        
-        # Encontrar PIDs comunes (para sugerir)
-        common_pids = sorted(list(pids_maq.intersection(pids_ivane)))
-        
-        st.write(f"Detectados {len(all_pids)} PIDs totales. ({len(common_pids)} coinciden en ambos archivos).")
-
-        selected_pids = st.multiselect(
-            "Selecciona el PID que quieres analizar (Déjalo vacío para ver TODO):",
-            options=all_pids,
-            default=None
-        )
-
-        # --- APLICAR FILTRO ---
-        if selected_pids:
-            # Filtrar Dataframes ORIGINALES
-            df_m_filtered = df_m[df_m[pid_col_m].isin(selected_pids)].copy()
-            df_i_filtered = df_i[df_i[pid_col_i].isin(selected_pids)].copy()
-            st.caption(f"Filtrando: Maquinillo ({len(df_m_filtered)} filas) | Ivane ({len(df_i_filtered)} filas)")
-        else:
-            df_m_filtered = df_m.copy()
-            df_i_filtered = df_i.copy()
-
-        # --- 4. PREPARACIÓN DE MÉTRICAS (Igual que antes pero con datos filtrados) ---
-        
-        # Limpiador de números
-        def clean_number(x):
-            if isinstance(x, str):
-                return float(x.replace(',', '').replace(' ', ''))
-            return float(x) if x else 0.0
-
-        metrics_maq = ['cloudfront_ok_count', 'cloudfront_error_count', 'paced_count']
-        metrics_ivane = ['Aftrad IMPs', 'AF Blocked IMPs']
-
-        # Maquinillo Processing
-        df_m_filtered[date_col_m] = pd.to_datetime(df_m_filtered[date_col_m], errors='coerce').dt.date
-        cols_found_m = []
-        for metric in metrics_maq:
-            match = next((c for c in df_m_filtered.columns if c.lower() == metric.lower()), None)
-            if match:
-                df_m_filtered[match] = df_m_filtered[match].apply(clean_number)
-                cols_found_m.append(match)
-
-        if cols_found_m:
-            df_m_grouped = df_m_filtered.groupby(date_col_m)[cols_found_m].sum().reset_index()
-            df_m_grouped = df_m_grouped.rename(columns={date_col_m: 'Fecha'})
-
-        # Ivane Processing
-        df_i_filtered[date_col_i] = pd.to_datetime(df_i_filtered[date_col_i], errors='coerce').dt.date
-        cols_found_i = []
-        for metric in metrics_ivane:
-            match = next((c for c in df_i_filtered.columns if c.lower() == metric.lower()), None)
-            if match:
-                df_i_filtered[match] = df_i_filtered[match].apply(clean_number)
-                cols_found_i.append(match)
-
-        if cols_found_i:
-            df_i_grouped = df_i_filtered.groupby(date_col_i)[cols_found_i].sum().reset_index()
-            df_i_grouped = df_i_grouped.rename(columns={date_col_i: 'Fecha'})
-
-        # --- 5. MERGE Y GRÁFICA ---
-        if cols_found_m and cols_found_i:
-            # Unir datos ya filtrados y agrupados
-            df_final = pd.merge(df_m_grouped, df_i_grouped, on='Fecha', how='outer').sort_values('Fecha').fillna(0)
-
-            st.markdown("### 📈 Visualización")
+    if file_maq:
+        try:
+            # Carga y limpieza
+            df_m = pd.read_csv(file_maq)
+            df_m.columns = df_m.columns.str.lower().str.strip()
             
-            all_metrics = cols_found_m + cols_found_i
+            # Columnas clave
+            col_date_m = st.selectbox("Columna Fecha (Maquinillo):", df_m.columns, index=0, key="date_m")
             
-            # Selector de métricas visuales
-            metrics_to_plot = st.multiselect(
-                "Métricas a graficar:",
-                options=all_metrics,
-                default=all_metrics
-            )
+            # Convertir fecha
+            try:
+                df_m[col_date_m] = pd.to_datetime(df_m[col_date_m])
+                df_m = df_m.sort_values(col_date_m)
+            except:
+                st.warning("No se pudo convertir la fecha automáticamente.")
 
-            if metrics_to_plot:
-                title_chart = f"Análisis: {', '.join(selected_pids)}" if selected_pids else "Análisis Global"
-                
-                fig = px.line(
-                    df_final,
-                    x='Fecha',
-                    y=metrics_to_plot,
-                    markers=True,
-                    title=title_chart,
-                    labels={'value': 'Eventos', 'variable': 'Métrica'}
-                )
-                fig.update_layout(hovermode="x unified")
-                st.plotly_chart(fig, use_container_width=True)
-
-                with st.expander("Ver Datos Numéricos"):
-                    st.dataframe(df_final)
+            # Filtros básicos (Agency, Template, PID)
+            st.markdown("##### 🔍 Filtros")
+            c1, c2, c3 = st.columns(3)
+            
+            # Agency
+            if 'agency' in df_m.columns:
+                opts_ag = sorted(df_m['agency'].astype(str).unique())
+                sel_ag = c1.multiselect("Agency", opts_ag, key="f_ag")
             else:
-                st.info("Selecciona métricas.")
-        else:
-            st.error("Faltan métricas clave en los archivos.")
+                sel_ag = []
+            
+            # Template
+            if 'template' in df_m.columns:
+                if sel_ag:
+                    opts_tp = sorted(df_m[df_m['agency'].isin(sel_ag)]['template'].astype(str).unique())
+                else:
+                    opts_tp = sorted(df_m['template'].astype(str).unique())
+                sel_tp = c2.multiselect("Template", opts_tp, key="f_tp")
+            else:
+                sel_tp = []
 
-    except Exception as e:
-        st.error(f"Error: {e}")
-else:
-    st.info("Carga ambos archivos para empezar.")
+            # PID
+            if 'pid' in df_m.columns:
+                df_temp = df_m.copy()
+                if sel_ag: df_temp = df_temp[df_temp['agency'].isin(sel_ag)]
+                if sel_tp: df_temp = df_temp[df_temp['template'].isin(sel_tp)]
+                opts_pid = sorted(df_temp['pid'].astype(str).unique())
+                sel_pid = c3.multiselect("PID", opts_pid, key="f_pid")
+            else:
+                sel_pid = []
+
+            # Aplicar filtros
+            df_m_filt = df_m.copy()
+            if sel_ag: df_m_filt = df_m_filt[df_m_filt['agency'].isin(sel_ag)]
+            if sel_tp: df_m_filt = df_m_filt[df_m_filt['template'].isin(sel_tp)]
+            if sel_pid: df_m_filt = df_m_filt[df_m_filt['pid'].isin(sel_pid)]
+
+            # Gráfica Maquinillo
+            st.markdown("---")
+            metrics_m = ['cloudfront_ok_count', 'cloudfront_error_count', 'paced_count']
+            avail_metrics_m = [c for c in metrics_m if c in df_m_filt.columns]
+            
+            # Agrupar por día para la gráfica
+            if avail_metrics_m:
+                df_m_chart = df_m_filt.groupby(col_date_m)[avail_metrics_m].sum().reset_index()
+                
+                st.subheader("📈 Gráfica Maquinillo")
+                fig_m = px.line(df_m_chart, x=col_date_m, y=avail_metrics_m, markers=True)
+                st.plotly_chart(fig_m, use_container_width=True)
+            
+            with st.expander("Ver Datos Maquinillo"):
+                st.dataframe(df_m_filt)
+
+        except Exception as e:
+            st.error(f"Error en Maquinillo: {e}")
+
+# ==========================================
+# PESTAÑA 2: IVANE (Sumatorios por día)
+# ==========================================
+with tab_ivane:
+    st.header("Análisis Ivane (Sumatorios Diarios)")
+    file_ivane = st.file_uploader("Sube CSV Ivane", type=["csv"], key="u_ivane")
+
+    if file_ivane:
+        try:
+            # 1. Cargar
+            df_i = pd.read_csv(file_ivane)
+            
+            # Limpiar columnas
+            df_i.columns = df_i.columns.str.strip()
+            
+            st.success(f"Cargado: {len(df_i)} filas.")
+
+            # 2. Configurar Fecha
+            col_date_i = st.selectbox("Selecciona la columna de FECHA:", df_i.columns, key="date_i")
+            
+            # Convertir a fecha real (solo día)
+            try:
+                df_i[col_date_i] = pd.to_datetime(df_i[col_date_i], errors='coerce').dt.date
+                df_i = df_i.sort_values(col_date_i)
+            except:
+                st.warning("⚠️ No se pudo convertir a formato fecha. Se usará como texto.")
+
+            st.markdown("---")
+            st.subheader("🔍 Filtros Dinámicos")
+            
+            # 3. Generar filtros automáticamente para columnas de texto
+            # Identificamos columnas que NO son números y NO son la fecha
+            cat_cols = df_i.select_dtypes(include=['object']).columns.tolist()
+            cat_cols = [c for c in cat_cols if c != col_date_i]
+            
+            # Filtros en columnas (3 por fila)
+            cols_filter = st.columns(3)
+            filters_applied = {}
+            
+            for idx, col in enumerate(cat_cols):
+                with cols_filter[idx % 3]:
+                    # Llenamos el filtro con los valores únicos
+                    options = sorted(df_i[col].astype(str).unique())
+                    selected = st.multiselect(f"Filtrar por {col}", options, key=f"fil_{col}")
+                    if selected:
+                        filters_applied[col] = selected
+
+            # 4. Aplicar Filtros
+            df_i_filt = df_i.copy()
+            for col, vals in filters_applied.items():
+                df_i_filt = df_i_filt[df_i_filt[col].astype(str).isin(vals)]
+
+            st.markdown(f"**Registros después de filtrar:** {len(df_i_filt)}")
+
+            # 5. TABLA DE SUMATORIOS POR DÍA (Lo que pediste)
+            st.markdown("---")
+            st.subheader("∑ Tabla de Sumatorios por Día")
+            
+            # Identificar columnas numéricas para sumar
+            num_cols = df_i_filt.select_dtypes(include=['float', 'int']).columns.tolist()
+            # Quitamos la fecha si la detectó como número por error
+            num_cols = [c for c in num_cols if c != col_date_i]
+
+            if num_cols:
+                # AGRUPAR Y SUMAR
+                df_sum = df_i_filt.groupby(col_date_i)[num_cols].sum().reset_index()
+                
+                # Mostrar tabla
+                st.dataframe(df_sum, use_container_width=True)
+
+                # 6. GRÁFICA IVANE
+                st.subheader("📈 Gráfica de Tendencia (Ivane)")
+                metrics_plot = st.multiselect("Métricas a graficar:", num_cols, default=num_cols[:2] if num_cols else None, key="plot_i")
+                
+                if metrics_plot:
+                    fig_i = px.line(df_sum, x=col_date_i, y=metrics_plot, markers=True, title="Totales Diarios")
+                    st.plotly_chart(fig_i, use_container_width=True)
+            else:
+                st.warning("No se encontraron columnas numéricas para sumar.")
+
+        except Exception as e:
+            st.error(f"Error procesando Ivane: {e}")
