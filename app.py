@@ -25,7 +25,6 @@ with tab_maq:
             df_m.columns = df_m.columns.str.lower().str.strip()
             
             # Fecha
-            # Buscamos columnas de fecha comunes
             cols_m = df_m.columns.tolist()
             idx_date_m = 0
             for i, col in enumerate(cols_m):
@@ -85,7 +84,7 @@ with tab_maq:
             st.error(f"Error Maquinillo: {e}")
 
 # ==========================================
-# PESTAÑA 2: IVANE (CORREGIDO)
+# PESTAÑA 2: IVANE (ACTUALIZADA CON TOTAL)
 # ==========================================
 with tab_ivane:
     st.header("Análisis Ivane")
@@ -95,18 +94,16 @@ with tab_ivane:
         try:
             # 1. Cargar y Limpiar
             df_i = pd.read_csv(file_ivane)
-            # Guardamos nombres originales para mostrar, pero normalizamos para buscar
             df_i.columns = df_i.columns.str.strip() 
             
             st.success(f"Archivo cargado: {len(df_i)} filas.")
 
-            # 2. Configuración de Columnas (Mapeo)
+            # 2. Configuración de Columnas
             st.subheader("⚙️ Configuración de Columnas")
             cols = df_i.columns.tolist()
             
             c_d, c_m1, c_m2 = st.columns(3)
             
-            # Buscar columnas por defecto (inteligente)
             def find_idx(keywords):
                 for i, col in enumerate(cols):
                     if any(k in col.lower() for k in keywords): return i
@@ -116,14 +113,14 @@ with tab_ivane:
             idx_date = find_idx(['date', 'fecha', 'time', 'day'])
             col_date = c_d.selectbox("Columna Fecha:", cols, index=idx_date, key="date_i")
             
-            # Métricas Objetivo (Aftrad IMPs y Blocked IMPs)
+            # Métricas Objetivo
             idx_imps = find_idx(['aftrad imps', 'imps', 'impressions'])
             col_imps = c_m1.selectbox("Col. Aftrad IMPs:", cols, index=idx_imps, key="c_imps")
             
             idx_blocked = find_idx(['blocked', 'block', 'b. imps'])
             col_blocked = c_m2.selectbox("Col. AF Blocked IMPs:", cols, index=idx_blocked, key="c_block")
 
-            # Columnas de Filtro (PID, APP ID, ADV, Agency)
+            # Columnas de Filtro
             st.caption("Verifica las columnas de filtro:")
             c_f1, c_f2, c_f3, c_f4 = st.columns(4)
             col_pid = c_f1.selectbox("Col. PID:", cols, index=find_idx(['pid', 'pub', 'site']), key="c_pid")
@@ -138,7 +135,7 @@ with tab_ivane:
             except:
                 st.warning("⚠️ Fecha tratada como texto.")
 
-            # Procesar Métricas (Limpiar números)
+            # Procesar Métricas
             for col in [col_imps, col_blocked]:
                 if df_i[col].dtype == object:
                     df_i[col] = pd.to_numeric(df_i[col].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
@@ -149,20 +146,15 @@ with tab_ivane:
             
             f1, f2, f3, f4 = st.columns(4)
             
-            # Filtros independientes
-            # PID
             opts_pid = sorted(df_i[col_pid].astype(str).unique())
             sel_pid = f1.multiselect("Filtrar PID", opts_pid, key="f_pid")
             
-            # APP ID
             opts_app = sorted(df_i[col_app].astype(str).unique())
             sel_app = f2.multiselect("Filtrar APP ID", opts_app, key="f_app")
             
-            # ADV
             opts_adv = sorted(df_i[col_adv].astype(str).unique())
             sel_adv = f3.multiselect("Filtrar ADV", opts_adv, key="f_adv")
             
-            # Agency
             opts_agy = sorted(df_i[col_agency].astype(str).unique())
             sel_agy = f4.multiselect("Filtrar Agency", opts_agy, key="f_agy")
 
@@ -173,11 +165,10 @@ with tab_ivane:
             if sel_adv: df_final = df_final[df_final[col_adv].astype(str).isin(sel_adv)]
             if sel_agy: df_final = df_final[df_final[col_agency].astype(str).isin(sel_agy)]
 
-            # --- 4. GRÁFICA (Solo Aftrad IMPs y Blocked) ---
+            # --- 4. GRÁFICA ---
             st.markdown("---")
             st.subheader("📈 Evolución Diaria")
             
-            # Agrupar por DÍA para la gráfica (sumando todo lo filtrado)
             df_chart = df_final.groupby(col_date)[[col_imps, col_blocked]].sum().reset_index()
             
             if not df_chart.empty:
@@ -186,32 +177,35 @@ with tab_ivane:
                     x=col_date, 
                     y=[col_imps, col_blocked], 
                     markers=True,
-                    title="Tendencia de Impresiones (Aftrad vs Blocked)",
+                    title="Tendencia de Impresiones",
                     labels={'value': 'Impresiones', 'variable': 'Métrica', col_date: 'Fecha'}
                 )
                 fig.update_layout(hovermode="x unified")
                 st.plotly_chart(fig, use_container_width=True)
 
-                # KPIs Totales
-                k1, k2 = st.columns(2)
-                k1.metric("Total Aftrad IMPs", f"{int(df_final[col_imps].sum()):,}")
-                k2.metric("Total AF Blocked IMPs", f"{int(df_final[col_blocked].sum()):,}")
+                k1, k2, k3 = st.columns(3)
+                total_imps = df_final[col_imps].sum()
+                total_blocked = df_final[col_blocked].sum()
+                k1.metric("Total Aftrad IMPs", f"{int(total_imps):,}")
+                k2.metric("Total AF Blocked IMPs", f"{int(total_blocked):,}")
+                k3.metric("Total COMBINADO", f"{int(total_imps + total_blocked):,}")
             else:
                 st.warning("No hay datos con los filtros seleccionados.")
 
-            # --- 5. TABLA DETALLADA (Día + Filtros) ---
+            # --- 5. TABLA DETALLADA (CON COLUMNA TOTAL) ---
             st.markdown("---")
-            st.subheader("📋 Tabla de Datos Detallada")
-            st.markdown("Aquí puedes ver el desglose por día y por las columnas de filtro (PID, APP ID, ADV, Agency).")
+            st.subheader("📋 Tabla de Datos Detallada (Con Total)")
             
-            # Agrupar por Fecha + Dimensiones de Filtro
             group_cols = [col_date, col_pid, col_app, col_adv, col_agency]
             metric_cols = [col_imps, col_blocked]
             
-            # Nos aseguramos de que las columnas existen y agrupamos
+            # Agrupar
             df_table = df_final.groupby(group_cols)[metric_cols].sum().reset_index()
             
-            # Ordenar por fecha
+            # --- AQUÍ ESTÁ EL CAMBIO: CALCULAR LA SUMA ---
+            df_table['TOTAL (Suma)'] = df_table[col_imps] + df_table[col_blocked]
+            
+            # Ordenar
             df_table = df_table.sort_values(col_date, ascending=False)
             
             st.dataframe(df_table, use_container_width=True)
