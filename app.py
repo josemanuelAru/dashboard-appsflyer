@@ -1,148 +1,157 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import re # Librería para buscar números en texto
 
 # Configuración de la página
-st.set_page_config(page_title="Dashboard Multi-Archivo", layout="wide")
+st.set_page_config(page_title="Dashboard Evolutivo", layout="wide")
 
-st.title("📊 Analizador de Reportes (Multi-Día)")
-st.markdown("Sube **uno o varios** archivos CSV. La app los combinará automáticamente.")
+st.title("📊 Dashboard Appsflyer (Evolución por Día)")
+st.markdown("Sube tus archivos. Puedes nombrarlos simplemente '12', '13', '14'... el sistema los ordenará correctamente.")
 
-# --- ZONA DE CARGA DE ARCHIVOS (Múltiple) ---
-uploaded_files = st.file_uploader("Arrastra tus archivos CSV aquí", type=["csv"], accept_multiple_files=True)
+# --- CARGA DE ARCHIVOS ---
+uploaded_files = st.file_uploader("Sube tus CSVs aquí", type=["csv"], accept_multiple_files=True)
 
 if uploaded_files:
-    # --- PROCESAR Y COMBINAR ARCHIVOS ---
+    # --- PROCESAMIENTO ---
     all_dataframes = []
     
     try:
         for file in uploaded_files:
-            # Leer cada archivo
             df_temp = pd.read_csv(file)
             
-            # Añadir columna con el nombre del archivo (para distinguir fechas/días)
-            df_temp['source_file'] = file.name
+            # 1. Limpiamos el nombre (quitamos .csv)
+            clean_name = file.name.replace('.csv', '').replace('.CSV', '')
+            
+            # 2. Buscamos el número del día para ordenar bien
+            # Esto busca el primer número que encuentre en el nombre del archivo
+            found_numbers = re.findall(r'\d+', clean_name)
+            
+            if found_numbers:
+                day_number = int(found_numbers[0])
+            else:
+                day_number = 0 # Si no hay número, lo pone al principio
+            
+            # Guardamos el nombre para mostrar y el número para ordenar
+            df_temp['source_name'] = clean_name
+            df_temp['day_sort_key'] = day_number
             
             all_dataframes.append(df_temp)
         
-        # Combinar todos en una sola tabla gigante
+        # Unir todos
         df = pd.concat(all_dataframes, ignore_index=True)
         
-        st.success(f"✅ Se han combinado {len(uploaded_files)} archivos correctamente. Total de filas: {len(df)}")
+        # --- ORDENAR INTELIGENTE ---
+        # Ordenamos por el número encontrado, no por el texto
+        df = df.sort_values('day_sort_key')
         
-        # --- LIMPIEZA DE DATOS ---
-        cols_num = ['cloudfront_ok_count', 'cloudfront_error_count', 'paced_count', 'ok_ratio', 'paced_ratio']
+        st.success(f"✅ Se han cargado {len(uploaded_files)} días. Ordenados del día {df['day_sort_key'].min()} al {df['day_sort_key'].max()}.")
         
-        # Validar columnas (solo chequeamos si existen en el combinado)
-        missing_cols = [c for c in cols_num if c not in df.columns]
-        if missing_cols:
-            st.error(f"⚠️ Error: Faltan columnas clave en tus archivos: {missing_cols}")
+        # --- LIMPIEZA DE COLUMNAS ---
+        cols_metrics = ['cloudfront_ok_count', 'cloudfront_error_count', 'paced_count', 'ok_ratio', 'paced_ratio']
+        
+        # Validar columnas
+        missing = [c for c in cols_metrics if c not in df.columns]
+        if missing:
+            st.error(f"Faltan columnas clave: {missing}")
             st.stop()
 
-        for col in cols_num:
+        # Convertir a números
+        for col in cols_metrics:
             if df[col].dtype == object:
                  df[col] = df[col].astype(str).str.replace(',', '')
             df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
             
-        # Asegurar strings
-        for col_str in ['agency', 'template', 'pid', 'source_file']:
-            if col_str in df.columns:
-                df[col_str] = df[col_str].astype(str)
-        
-        # --- BARRA LATERAL (FILTROS) ---
+        # Convertir textos
+        for col in ['agency', 'template', 'pid', 'source_name']:
+            if col in df.columns:
+                df[col] = df[col].astype(str)
+
+        # --- FILTROS ---
         st.sidebar.header("Filtros")
 
-        # 0. Filtro por Archivo (Opcional, por si quieres ver solo un día específico del grupo)
-        all_files = sorted(df['source_file'].unique())
-        selected_files = st.sidebar.multiselect("Filtrar por Archivo/Día", all_files)
-
-        # 1. Filtro Agency
-        if selected_files:
-            df = df[df['source_file'].isin(selected_files)]
-            
+        # 1. Agency
         all_agencies = sorted(df['agency'].unique())
-        selected_agency = st.sidebar.multiselect("Agency", all_agencies)
+        sel_agency = st.sidebar.multiselect("Agency", all_agencies)
 
-        # 2. Filtro Template
-        if selected_agency:
-            df_step1 = df[df['agency'].isin(selected_agency)]
-            available_templates = sorted(df_step1['template'].unique())
+        # 2. Template
+        if sel_agency:
+            df_s1 = df[df['agency'].isin(sel_agency)]
+            opts_templ = sorted(df_s1['template'].unique())
         else:
-            available_templates = sorted(df['template'].unique())
-            
-        selected_template = st.sidebar.multiselect("Template", available_templates)
+            opts_templ = sorted(df['template'].unique())
+        sel_template = st.sidebar.multiselect("Template", opts_templ)
 
-        # 3. Filtro PID
-        if selected_template:
-            if selected_agency:
-                df_step2 = df[(df['agency'].isin(selected_agency)) & (df['template'].isin(selected_template))]
+        # 3. PID
+        if sel_template:
+            if sel_agency:
+                df_s2 = df[(df['agency'].isin(sel_agency)) & (df['template'].isin(sel_template))]
             else:
-                df_step2 = df[df['template'].isin(selected_template)]
-            available_pids = sorted(df_step2['pid'].unique())
-        elif selected_agency:
-            available_pids = sorted(df[df['agency'].isin(selected_agency)]['pid'].unique())
+                df_s2 = df[df['template'].isin(sel_template)]
+            opts_pid = sorted(df_s2['pid'].unique())
+        elif sel_agency:
+            opts_pid = sorted(df[df['agency'].isin(sel_agency)]['pid'].unique())
         else:
-            available_pids = sorted(df['pid'].unique())
+            opts_pid = sorted(df['pid'].unique())
+        sel_pid = st.sidebar.multiselect("PID", opts_pid)
 
-        selected_pid = st.sidebar.multiselect("PID", available_pids)
-
-        # --- APLICAR RESTO DE FILTROS ---
+        # --- APLICAR FILTROS ---
         df_filtered = df.copy()
+        if sel_agency: df_filtered = df_filtered[df_filtered['agency'].isin(sel_agency)]
+        if sel_template: df_filtered = df_filtered[df_filtered['template'].isin(sel_template)]
+        if sel_pid: df_filtered = df_filtered[df_filtered['pid'].isin(sel_pid)]
 
-        if selected_agency:
-            df_filtered = df_filtered[df_filtered['agency'].isin(selected_agency)]
-        
-        if selected_template:
-            df_filtered = df_filtered[df_filtered['template'].isin(selected_template)]
-
-        if selected_pid:
-            df_filtered = df_filtered[df_filtered['pid'].isin(selected_pid)]
-
-        # --- KPI CARDS ---
+        # --- GRÁFICA DE EVOLUCIÓN ---
         st.markdown("---")
-        kpi1, kpi2, kpi3 = st.columns(3)
-        # Sumamos los totales de TODOS los archivos seleccionados
-        kpi1.metric("Total Tráfico OK", f"{int(df_filtered['cloudfront_ok_count'].sum()):,}")
-        kpi2.metric("Total Errores", f"{int(df_filtered['cloudfront_error_count'].sum()):,}")
-        # Promedio ponderado simple del ratio
-        avg_ratio = df_filtered['ok_ratio'].mean() if not df_filtered.empty else 0
-        kpi3.metric("Ratio OK Promedio", f"{avg_ratio:.2%}")
+        st.markdown("### 📈 Evolución Mensual")
 
-        # --- TABLA ---
-        with st.expander("Ver Datos Combinados", expanded=False):
-            st.dataframe(df_filtered, use_container_width=True)
-
-        # --- GRÁFICAS ---
-        st.markdown("### 📈 Visualización Comparativa")
+        # Agrupar por día (usando source_name y day_sort_key)
+        agg_rules = {
+            'cloudfront_ok_count': 'sum',
+            'cloudfront_error_count': 'sum',
+            'paced_count': 'sum',
+            'ok_ratio': 'mean',
+            'paced_ratio': 'mean',
+            'day_sort_key': 'first' # Mantenemos el número para ordenar la gráfica
+        }
         
-        c1, c2 = st.columns(2)
-        with c1:
-            y_axis = st.selectbox("Métrica (Eje Y)", cols_num)
-        with c2:
-            # Añadimos 'source_file' para poder comparar días en la gráfica
-            x_axis = st.selectbox("Agrupar por (Eje X)", ['agency', 'template', 'pid', 'source_file'])
+        # Agrupamos por el nombre del archivo
+        df_time = df_filtered.groupby('source_name').agg(agg_rules).reset_index()
+        
+        # ¡IMPORTANTE! Volvemos a ordenar la tabla resumida para que la gráfica salga bien
+        df_time = df_time.sort_values('day_sort_key')
 
-        if not df_filtered.empty:
-            # Agrupar
-            df_chart = df_filtered.groupby(x_axis)[y_axis].sum().reset_index()
-            # Top 20
-            df_chart = df_chart.sort_values(by=y_axis, ascending=False).head(30)
-
-            fig = px.bar(
-                df_chart, 
-                x=x_axis, 
-                y=y_axis,
-                title=f"{y_axis} por {x_axis}",
-                color=y_axis,
-                color_continuous_scale='Viridis',
-                text_auto='.2s' # Muestra el valor encima de la barra resumido (ej: 1.5M)
+        col_sel, col_chart = st.columns([1, 3])
+        
+        with col_sel:
+            st.markdown("**Elige qué ver:**")
+            metrics_to_plot = st.multiselect(
+                "Métricas",
+                options=cols_metrics,
+                default=['cloudfront_ok_count']
             )
-            st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.warning("No hay datos tras filtrar.")
+
+        with col_chart:
+            if metrics_to_plot:
+                fig_line = px.line(
+                    df_time, 
+                    x='source_name', 
+                    y=metrics_to_plot, 
+                    markers=True,
+                    title="Tendencia Diaria",
+                    labels={'source_name': 'Día (Archivo)', 'value': 'Valor', 'variable': 'Métrica'}
+                )
+                fig_line.update_layout(hovermode="x unified")
+                st.plotly_chart(fig_line, use_container_width=True)
+            else:
+                st.info("Selecciona métricas a la izquierda.")
+
+        # --- TABLA DE DATOS ---
+        with st.expander("Ver detalle de datos"):
+            st.dataframe(df_filtered)
 
     except Exception as e:
-        st.error(f"Ocurrió un error al procesar los archivos: {e}")
+        st.error(f"Error: {e}")
 
 else:
-    st.info("👆 Arrastra tus archivos CSV (Reporte_Lunes.csv, Reporte_Martes.csv...) para comenzar.")
+    st.info("Sube tus archivos CSV (Ej: '12.csv', '13.csv').")
