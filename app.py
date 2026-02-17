@@ -2,181 +2,109 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
-# Configuración de la página
-st.set_page_config(page_title="Dashboard Universal", layout="wide")
+st.set_page_config(page_title="Comparador de CSVs", layout="wide")
 
-st.title("⏱️ Analizador de Tráfico (Universal)")
-st.markdown("Sube tu CSV. Si las columnas tienen nombres distintos, podrás seleccionarlas manualmente.")
+st.title("⚔️ Comparador de Reportes (Cruce de Datos)")
+st.markdown("Sube dos archivos diferentes y define sus equivalencias para comparar métricas.")
 
-# --- CARGA DE ARCHIVO ---
-uploaded_file = st.file_uploader("Sube tu archivo CSV aquí", type=["csv"])
+# --- PASO 1: SUBIR LOS DOS ARCHIVOS ---
+c1, c2 = st.columns(2)
+with c1:
+    file1 = st.file_uploader("📂 Archivo 1 (Izquierda)", type=["csv"], key="f1")
+with c2:
+    file2 = st.file_uploader("📂 Archivo 2 (Derecha)", type=["csv"], key="f2")
 
-if uploaded_file is not None:
+if file1 and file2:
     try:
-        # 1. INTENTO DE LECTURA INTELIGENTE (Detectar separador ; o ,)
-        # Leemos las primeras lineas para ver si es ; o ,
-        import csv
-        uploaded_file.seek(0)
-        sample = uploaded_file.read(1024).decode("utf-8", errors="ignore")
-        uploaded_file.seek(0)
+        # Cargar archivos
+        df1 = pd.read_csv(file1)
+        df2 = pd.read_csv(file2)
         
-        # Detectar delimitador
-        sniffer = csv.Sniffer()
-        try:
-            dialect = sniffer.sniff(sample)
-            delimiter = dialect.delimiter
-        except:
-            delimiter = ',' # Por defecto
-            
-        # Leer el CSV con el delimitador detectado
-        df = pd.read_csv(uploaded_file, sep=delimiter)
-        
-        # Normalizar nombres de columnas (minusculas y sin espacios)
-        df.columns = df.columns.str.lower().str.strip()
-        
-        st.success(f"✅ Archivo cargado correctamente ({len(df)} filas). Separador detectado: '{delimiter}'")
+        # Limpiar nombres de columnas (minúsculas y sin espacios) para facilitar lectura
+        df1.columns = df1.columns.str.strip()
+        df2.columns = df2.columns.str.strip()
 
-        # --- 2. MAPEO DE COLUMNAS (LO IMPORTANTE) ---
-        st.markdown("### 🔧 Configuración de Columnas")
-        st.info("Confirma qué columna de tu Excel corresponde a cada dato:")
-
-        cols_disponibles = df.columns.tolist()
-
-        c1, c2, c3, c4 = st.columns(4)
-        
-        # Función para buscar la columna más parecida por defecto
-        def find_default(options, keywords):
-            for opt in options:
-                if any(k in opt for k in keywords):
-                    return opt
-            return options[0] if options else None
-
-        # Selectores manuales
-        with c1:
-            col_agency = st.selectbox(
-                "Columna Agencia (Agency)", 
-                cols_disponibles, 
-                index=cols_disponibles.index(find_default(cols_disponibles, ['agency', 'agencia', 'partner', 'source']))
-            )
-        
-        with c2:
-            col_template = st.selectbox(
-                "Columna Template", 
-                cols_disponibles,
-                index=cols_disponibles.index(find_default(cols_disponibles, ['template', 'plantilla', 'creative']))
-            )
-
-        with c3:
-            col_pid = st.selectbox(
-                "Columna PID", 
-                cols_disponibles,
-                index=cols_disponibles.index(find_default(cols_disponibles, ['pid', 'pub', 'id']))
-            )
-            
-        with c4:
-            col_time = st.selectbox(
-                "Columna Fecha/Hora", 
-                cols_disponibles,
-                index=cols_disponibles.index(find_default(cols_disponibles, ['date', 'time', 'fecha', 'hora', 'day']))
-            )
-
-        # --- 3. PROCESAMIENTO DE DATOS ---
-        
-        # Convertir Fecha
-        try:
-            df[col_time] = pd.to_datetime(df[col_time])
-            df = df.sort_values(col_time)
-        except:
-            st.warning(f"⚠️ La columna '{col_time}' se usará como texto (no es fecha válida).")
-
-        # Limpieza de Métricas (Buscamos las columnas numéricas automáticamente)
-        metrics_keywords = ['count', 'ok', 'error', 'paced', 'total']
-        possible_metrics = [c for c in cols_disponibles if any(k in c for k in metrics_keywords) and c not in [col_agency, col_template, col_pid, col_time]]
-        
-        # Si no encuentra métricas obvias, deja elegir al usuario
-        if not possible_metrics:
-            possible_metrics = st.multiselect("No detecté métricas automáticas. Selecciona las columnas numéricas:", cols_disponibles)
-        
-        # Convertir a números
-        for col in possible_metrics:
-            if df[col].dtype == object:
-                 df[col] = df[col].astype(str).str.replace(',', '')
-            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
-            
-        # Convertir dimensiones a string
-        for col in [col_agency, col_template, col_pid]:
-            df[col] = df[col].astype(str)
-
-        # --- 4. FILTROS LATERALES ---
-        st.sidebar.header("Filtros")
-
-        # Filtro A: Agencia
-        all_agencies = sorted(df[col_agency].unique())
-        sel_agency = st.sidebar.multiselect("Agency", all_agencies)
-
-        # Filtro B: Template
-        if sel_agency:
-            df_s1 = df[df[col_agency].isin(sel_agency)]
-            opts_templ = sorted(df_s1[col_template].unique())
-        else:
-            opts_templ = sorted(df[col_template].unique())
-        sel_template = st.sidebar.multiselect("Template", opts_templ)
-
-        # Filtro C: PID
-        df_s2 = df.copy()
-        if sel_agency: df_s2 = df_s2[df_s2[col_agency].isin(sel_agency)]
-        if sel_template: df_s2 = df_s2[df_s2[col_template].isin(sel_template)]
-        opts_pid = sorted(df_s2[col_pid].unique())
-        sel_pid = st.sidebar.multiselect("PID", opts_pid)
-
-        # --- APLICAR FILTROS ---
-        df_final = df.copy()
-        if sel_agency: df_final = df_final[df_final[col_agency].isin(sel_agency)]
-        if sel_template: df_final = df_final[df_final[col_template].isin(sel_template)]
-        if sel_pid: df_final = df_final[df_final[col_pid].isin(sel_pid)]
-
-        # --- 5. GRÁFICA ---
+        st.success(f"✅ Archivos cargados. Archivo 1: {len(df1)} filas | Archivo 2: {len(df2)} filas.")
         st.markdown("---")
-        
-        if not df_final.empty:
-            # Agrupar
-            df_chart = df_final.groupby(col_time)[possible_metrics].sum().reset_index()
 
-            st.markdown(f"### 📈 Evolución: {len(df_final)} registros")
-            
-            c_sel, c_graph = st.columns([1, 4])
-            
-            with c_sel:
-                metrics_to_plot = st.multiselect(
-                    "Métricas a graficar:",
-                    options=possible_metrics,
-                    default=possible_metrics[:2] if possible_metrics else None
-                )
-            
-            with c_graph:
-                if metrics_to_plot:
-                    fig = px.line(
-                        df_chart, 
-                        x=col_time, 
-                        y=metrics_to_plot, 
-                        markers=True,
-                        title="Evolución Temporal",
-                        labels={'value': 'Cantidad', col_time: 'Fecha/Hora', 'variable': 'Métrica'}
-                    )
-                    fig.update_layout(hovermode="x unified")
-                    st.plotly_chart(fig, use_container_width=True)
-                else:
-                    st.info("Selecciona métricas.")
-            
-            # Tabla
-            with st.expander("Ver Datos"):
-                st.dataframe(df_final)
-                
+        # --- PASO 2: DEFINIR EQUIVALENCIAS (KEYS) ---
+        st.subheader("1️⃣ Definir la columna en común (La Llave)")
+        st.info("Selecciona la columna que identifica lo mismo en ambos archivos (Ej: 'PID' en uno y 'Publisher_ID' en el otro).")
+
+        col_key1, col_key2 = st.columns(2)
+        
+        with col_key1:
+            key1 = st.selectbox(f"Llave en {file1.name}:", df1.columns)
+        
+        with col_key2:
+            key2 = st.selectbox(f"Llave en {file2.name}:", df2.columns)
+
+        # --- PASO 3: HACER EL CRUCE (MERGE) ---
+        # Realizamos el 'merge' inner (solo lo que coincide en ambos)
+        # Añadimos sufijos _1 y _2 para distinguir columnas con el mismo nombre (ej: count_1, count_2)
+        df_merged = pd.merge(df1, df2, left_on=key1, right_on=key2, how='inner', suffixes=('_Archivo1', '_Archivo2'))
+        
+        if df_merged.empty:
+            st.error("❌ El cruce no generó resultados. No hay valores coincidentes en las columnas seleccionadas.")
         else:
-            st.warning("No hay datos con esos filtros.")
+            st.success(f"🔗 ¡Cruce exitoso! Se encontraron {len(df_merged)} coincidencias exactas.")
+            
+            # --- PASO 4: COMPARAR MÉTRICAS ---
+            st.markdown("---")
+            st.subheader("2️⃣ Comparativa Gráfica")
+            
+            # Identificar columnas numéricas para graficar
+            nums1 = df_merged.select_dtypes(include=['float', 'int']).columns.tolist()
+            
+            if not nums1:
+                st.warning("No se encontraron columnas numéricas para comparar.")
+            else:
+                cg1, cg2, cg3 = st.columns(3)
+                
+                with cg1:
+                    metric_x = st.selectbox("Eje X (Dato del Archivo 1)", nums1, index=0)
+                with cg2:
+                    metric_y = st.selectbox("Eje Y (Dato del Archivo 2)", nums1, index=1 if len(nums1)>1 else 0)
+                with cg3:
+                    # Opcional: Color por categoría
+                    cat_cols = df_merged.select_dtypes(include=['object']).columns.tolist()
+                    color_col = st.selectbox("Color por (Opcional)", ["Ninguno"] + cat_cols)
+
+                # Calcular la diferencia/discrepancia
+                df_merged['Diferencia'] = df_merged[metric_x] - df_merged[metric_y]
+                df_merged['% Discrepancia'] = ((df_merged[metric_x] - df_merged[metric_y]) / df_merged[metric_x]).fillna(0) * 100
+
+                # --- GRÁFICA DE DISPERSIÓN (SCATTER) ---
+                # Es la mejor para comparar A vs B. Si los puntos están en la linea diagonal, coinciden perfecto.
+                fig = px.scatter(
+                    df_merged,
+                    x=metric_x,
+                    y=metric_y,
+                    color=None if color_col == "Ninguno" else color_col,
+                    hover_data=[key1, key2, 'Diferencia', '% Discrepancia'],
+                    title=f"Comparativa: {metric_x} vs {metric_y}",
+                    template="plotly_white"
+                )
+                
+                # Añadir una línea diagonal de referencia (donde X = Y)
+                fig.add_shape(type="line",
+                    x0=min(df_merged[metric_x].min(), df_merged[metric_y].min()),
+                    y0=min(df_merged[metric_x].min(), df_merged[metric_y].min()),
+                    x1=max(df_merged[metric_x].max(), df_merged[metric_y].max()),
+                    y1=max(df_merged[metric_x].max(), df_merged[metric_y].max()),
+                    line=dict(color="Red", dash="dash"),
+                    opacity=0.5
+                )
+                
+                st.plotly_chart(fig, use_container_width=True)
+                st.caption("💡 La línea roja discontinua representa la coincidencia perfecta. Los puntos alejados son discrepancias.")
+
+            # --- TABLA DE DATOS CRUZADOS ---
+            with st.expander("Ver Tabla de Datos Cruzados y Discrepancias"):
+                st.dataframe(df_merged)
 
     except Exception as e:
-        st.error(f"Error: {e}")
+        st.error(f"Error procesando los archivos: {e}")
 
 else:
-    st.info("👆 Sube tu archivo CSV.")
+    st.info("👆 Sube dos archivos CSV para comenzar la comparativa.")
