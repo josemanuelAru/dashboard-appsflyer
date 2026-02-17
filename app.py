@@ -3,156 +3,180 @@ import pandas as pd
 import plotly.express as px
 
 # Configuración de la página
-st.set_page_config(page_title="Dashboard Temporal Completo", layout="wide")
+st.set_page_config(page_title="Dashboard Universal", layout="wide")
 
-st.title("⏱️ Analizador de Tráfico (Filtros + Tiempo)")
-st.markdown("Sube tu CSV histórico. Podrás filtrar por Agency/Template/PID y ver la evolución temporal.")
+st.title("⏱️ Analizador de Tráfico (Universal)")
+st.markdown("Sube tu CSV. Si las columnas tienen nombres distintos, podrás seleccionarlas manualmente.")
 
 # --- CARGA DE ARCHIVO ---
-uploaded_file = st.file_uploader("Sube tu archivo CSV único aquí", type=["csv"])
+uploaded_file = st.file_uploader("Sube tu archivo CSV aquí", type=["csv"])
 
 if uploaded_file is not None:
     try:
-        # Cargar datos
-        df = pd.read_csv(uploaded_file)
+        # 1. INTENTO DE LECTURA INTELIGENTE (Detectar separador ; o ,)
+        # Leemos las primeras lineas para ver si es ; o ,
+        import csv
+        uploaded_file.seek(0)
+        sample = uploaded_file.read(1024).decode("utf-8", errors="ignore")
+        uploaded_file.seek(0)
         
-        # --- TRUCO: NORMALIZAR COLUMNAS ---
-        # Convertimos todos los nombres de columnas a minúsculas para evitar errores
-        # Así funciona igual si tu columna se llama "Agency", "AGENCY" o "agency"
+        # Detectar delimitador
+        sniffer = csv.Sniffer()
+        try:
+            dialect = sniffer.sniff(sample)
+            delimiter = dialect.delimiter
+        except:
+            delimiter = ',' # Por defecto
+            
+        # Leer el CSV con el delimitador detectado
+        df = pd.read_csv(uploaded_file, sep=delimiter)
+        
+        # Normalizar nombres de columnas (minusculas y sin espacios)
         df.columns = df.columns.str.lower().str.strip()
         
-        st.success(f"✅ Archivo cargado: {len(df)} filas detectadas.")
+        st.success(f"✅ Archivo cargado correctamente ({len(df)} filas). Separador detectado: '{delimiter}'")
 
-        # --- 1. CONFIGURACIÓN DE TIEMPO ---
-        st.markdown("### 1️⃣ Configuración de Tiempo")
-        
-        # Buscamos columnas que parezcan fechas
-        possible_time_cols = [c for c in df.columns if any(x in c for x in ['date', 'time', 'fecha', 'hora', 'day', 'dia'])]
-        default_idx = df.columns.get_loc(possible_time_cols[0]) if possible_time_cols else 0
-        
-        time_col = st.selectbox("¿Cuál es la columna de Fecha/Hora?", df.columns, index=default_idx)
+        # --- 2. MAPEO DE COLUMNAS (LO IMPORTANTE) ---
+        st.markdown("### 🔧 Configuración de Columnas")
+        st.info("Confirma qué columna de tu Excel corresponde a cada dato:")
 
-        # Convertir a datetime
+        cols_disponibles = df.columns.tolist()
+
+        c1, c2, c3, c4 = st.columns(4)
+        
+        # Función para buscar la columna más parecida por defecto
+        def find_default(options, keywords):
+            for opt in options:
+                if any(k in opt for k in keywords):
+                    return opt
+            return options[0] if options else None
+
+        # Selectores manuales
+        with c1:
+            col_agency = st.selectbox(
+                "Columna Agencia (Agency)", 
+                cols_disponibles, 
+                index=cols_disponibles.index(find_default(cols_disponibles, ['agency', 'agencia', 'partner', 'source']))
+            )
+        
+        with c2:
+            col_template = st.selectbox(
+                "Columna Template", 
+                cols_disponibles,
+                index=cols_disponibles.index(find_default(cols_disponibles, ['template', 'plantilla', 'creative']))
+            )
+
+        with c3:
+            col_pid = st.selectbox(
+                "Columna PID", 
+                cols_disponibles,
+                index=cols_disponibles.index(find_default(cols_disponibles, ['pid', 'pub', 'id']))
+            )
+            
+        with c4:
+            col_time = st.selectbox(
+                "Columna Fecha/Hora", 
+                cols_disponibles,
+                index=cols_disponibles.index(find_default(cols_disponibles, ['date', 'time', 'fecha', 'hora', 'day']))
+            )
+
+        # --- 3. PROCESAMIENTO DE DATOS ---
+        
+        # Convertir Fecha
         try:
-            df[time_col] = pd.to_datetime(df[time_col])
-            df = df.sort_values(time_col)
-        except Exception as e:
-            st.warning(f"⚠️ La columna '{time_col}' se usará como texto (no se pudo convertir a fecha).")
+            df[col_time] = pd.to_datetime(df[col_time])
+            df = df.sort_values(col_time)
+        except:
+            st.warning(f"⚠️ La columna '{col_time}' se usará como texto (no es fecha válida).")
 
-        # --- 2. LIMPIEZA DE MÉTRICAS ---
-        # Definimos las columnas que queremos ver (ignorando los ratios)
-        cols_metrics = ['cloudfront_ok_count', 'cloudfront_error_count', 'paced_count']
+        # Limpieza de Métricas (Buscamos las columnas numéricas automáticamente)
+        metrics_keywords = ['count', 'ok', 'error', 'paced', 'total']
+        possible_metrics = [c for c in cols_disponibles if any(k in c for k in metrics_keywords) and c not in [col_agency, col_template, col_pid, col_time]]
         
-        # Verificamos cuáles existen realmente en el archivo
-        available_metrics = [c for c in cols_metrics if c in df.columns]
+        # Si no encuentra métricas obvias, deja elegir al usuario
+        if not possible_metrics:
+            possible_metrics = st.multiselect("No detecté métricas automáticas. Selecciona las columnas numéricas:", cols_disponibles)
         
-        if not available_metrics:
-            st.error(f"❌ No encuentro las columnas de datos: {cols_metrics}. Revisa tu CSV.")
-            st.stop()
-
-        # Limpiar números (quitar comas de miles si las hay)
-        for col in available_metrics:
+        # Convertir a números
+        for col in possible_metrics:
             if df[col].dtype == object:
                  df[col] = df[col].astype(str).str.replace(',', '')
             df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
             
-        # Asegurar que los filtros sean texto
-        for col in ['agency', 'template', 'pid']:
-            if col in df.columns:
-                df[col] = df[col].astype(str)
+        # Convertir dimensiones a string
+        for col in [col_agency, col_template, col_pid]:
+            df[col] = df[col].astype(str)
 
-        # --- 3. BARRA LATERAL CON FILTROS (Agency -> Template -> PID) ---
+        # --- 4. FILTROS LATERALES ---
         st.sidebar.header("Filtros")
 
-        # Filtro A: Agency
-        if 'agency' in df.columns:
-            all_agencies = sorted(df['agency'].unique())
-            sel_agency = st.sidebar.multiselect("Agency", all_agencies)
-        else:
-            sel_agency = []
-            st.sidebar.warning("No encontré la columna 'agency'")
+        # Filtro A: Agencia
+        all_agencies = sorted(df[col_agency].unique())
+        sel_agency = st.sidebar.multiselect("Agency", all_agencies)
 
-        # Filtro B: Template (Dinámico)
-        if 'template' in df.columns:
-            # Si hay agencia seleccionada, mostramos solo sus templates
-            if sel_agency:
-                df_filtered_step1 = df[df['agency'].isin(sel_agency)]
-                opts_templ = sorted(df_filtered_step1['template'].unique())
-            else:
-                opts_templ = sorted(df['template'].unique())
-                
-            sel_template = st.sidebar.multiselect("Template", opts_templ)
+        # Filtro B: Template
+        if sel_agency:
+            df_s1 = df[df[col_agency].isin(sel_agency)]
+            opts_templ = sorted(df_s1[col_template].unique())
         else:
-            sel_template = []
+            opts_templ = sorted(df[col_template].unique())
+        sel_template = st.sidebar.multiselect("Template", opts_templ)
 
-        # Filtro C: PID (Dinámico)
-        if 'pid' in df.columns:
-            # Filtramos PID basado en lo anterior
-            df_step2 = df.copy()
-            if sel_agency:
-                df_step2 = df_step2[df_step2['agency'].isin(sel_agency)]
-            if sel_template:
-                df_step2 = df_step2[df_step2['template'].isin(sel_template)]
-                
-            opts_pid = sorted(df_step2['pid'].unique())
-            sel_pid = st.sidebar.multiselect("PID", opts_pid)
-        else:
-            sel_pid = []
+        # Filtro C: PID
+        df_s2 = df.copy()
+        if sel_agency: df_s2 = df_s2[df_s2[col_agency].isin(sel_agency)]
+        if sel_template: df_s2 = df_s2[df_s2[col_template].isin(sel_template)]
+        opts_pid = sorted(df_s2[col_pid].unique())
+        sel_pid = st.sidebar.multiselect("PID", opts_pid)
 
-        # --- APLICAR TODOS LOS FILTROS ---
+        # --- APLICAR FILTROS ---
         df_final = df.copy()
-        if sel_agency: df_final = df_final[df_final['agency'].isin(sel_agency)]
-        if sel_template: df_final = df_final[df_final['template'].isin(sel_template)]
-        if sel_pid: df_final = df_final[df_final['pid'].isin(sel_pid)]
+        if sel_agency: df_final = df_final[df_final[col_agency].isin(sel_agency)]
+        if sel_template: df_final = df_final[df_final[col_template].isin(sel_template)]
+        if sel_pid: df_final = df_final[df_final[col_pid].isin(sel_pid)]
 
-        # --- 4. GRÁFICA Y DATOS ---
+        # --- 5. GRÁFICA ---
         st.markdown("---")
         
         if not df_final.empty:
-            # Agrupar datos por la fecha seleccionada
-            df_chart = df_final.groupby(time_col)[available_metrics].sum().reset_index()
+            # Agrupar
+            df_chart = df_final.groupby(col_time)[possible_metrics].sum().reset_index()
 
-            st.markdown(f"### 📈 Evolución: {len(df_final)} registros filtrados")
-
-            col_izq, col_der = st.columns([1, 4])
+            st.markdown(f"### 📈 Evolución: {len(df_final)} registros")
             
-            with col_izq:
-                st.markdown("**Elige Métricas:**")
+            c_sel, c_graph = st.columns([1, 4])
+            
+            with c_sel:
                 metrics_to_plot = st.multiselect(
-                    "Mostrar en gráfica:",
-                    options=available_metrics,
-                    default=available_metrics[:1] # Marca la primera por defecto
+                    "Métricas a graficar:",
+                    options=possible_metrics,
+                    default=possible_metrics[:2] if possible_metrics else None
                 )
-
-            with col_der:
+            
+            with c_graph:
                 if metrics_to_plot:
                     fig = px.line(
                         df_chart, 
-                        x=time_col, 
+                        x=col_time, 
                         y=metrics_to_plot, 
                         markers=True,
-                        title="Tráfico en el tiempo",
-                        labels={'value': 'Total Eventos', time_col: 'Fecha/Hora', 'variable': 'Métrica'}
+                        title="Evolución Temporal",
+                        labels={'value': 'Cantidad', col_time: 'Fecha/Hora', 'variable': 'Métrica'}
                     )
                     fig.update_layout(hovermode="x unified")
                     st.plotly_chart(fig, use_container_width=True)
                 else:
-                    st.info("Selecciona una métrica a la izquierda para ver la gráfica.")
-
-            # KPI Resumen
-            kpi_cols = st.columns(len(available_metrics))
-            for i, metric in enumerate(available_metrics):
-                val = df_final[metric].sum()
-                kpi_cols[i].metric(label=f"Total {metric}", value=f"{int(val):,}")
-
+                    st.info("Selecciona métricas.")
+            
             # Tabla
-            with st.expander("Ver Tabla de Datos Filtrados"):
+            with st.expander("Ver Datos"):
                 st.dataframe(df_final)
+                
         else:
-            st.warning("⚠️ No hay datos que coincidan con los filtros seleccionados.")
+            st.warning("No hay datos con esos filtros.")
 
     except Exception as e:
-        st.error(f"Error procesando el archivo: {e}")
+        st.error(f"Error: {e}")
 
 else:
-    st.info("👆 Sube tu CSV único con columnas: agency, template, pid y una fecha/hora.")
+    st.info("👆 Sube tu archivo CSV.")
