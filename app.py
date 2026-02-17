@@ -36,7 +36,7 @@ if uploaded_file is not None:
             st.warning(f"⚠️ No pudimos convertir '{time_col}' a formato fecha automáticamente. Se usará como texto. Error: {e}")
 
         # --- LIMPIEZA DE MÉTRICAS ---
-        # Solo las que pediste (sin ratios)
+        # Solo las métricas de conteo (sin ratios)
         cols_metrics = ['cloudfront_ok_count', 'cloudfront_error_count', 'paced_count']
         
         # Validar que existan
@@ -56,7 +56,7 @@ if uploaded_file is not None:
             if col in df.columns:
                 df[col] = df[col].astype(str)
 
-        # --- FILTROS ---
+        # --- FILTROS SIDEBAR ---
         st.sidebar.header("Filtros")
 
         # 1. Agency
@@ -104,7 +104,50 @@ if uploaded_file is not None:
         st.markdown(f"### 📈 Evolución por {time_col}")
 
         # Agrupar por la columna de tiempo seleccionada
-        # Sumamos los contadores
-        df_time = df_filtered.groupby(time_col)[available_metrics].sum().reset_index()
+        if not df_filtered.empty:
+            df_time = df_filtered.groupby(time_col)[available_metrics].sum().reset_index()
 
-        col_sel, col_chart = st.columns([1,
+            # AQUÍ ESTABA EL ERROR ANTERIOR (Línea corregida):
+            col_sel, col_chart = st.columns([1, 4])
+            
+            with col_sel:
+                st.markdown("**Métricas:**")
+                metrics_to_plot = st.multiselect(
+                    "Seleccionar",
+                    options=available_metrics,
+                    default=available_metrics[:1]
+                )
+
+            with col_chart:
+                if metrics_to_plot:
+                    fig_line = px.line(
+                        df_time, 
+                        x=time_col, 
+                        y=metrics_to_plot, 
+                        markers=True,
+                        title="Tráfico por Hora/Día",
+                        labels={'value': 'Cantidad', time_col: 'Fecha/Hora', 'variable': 'Métrica'}
+                    )
+                    fig_line.update_layout(hovermode="x unified")
+                    st.plotly_chart(fig_line, use_container_width=True)
+                else:
+                    st.info("Selecciona al menos una métrica.")
+            
+            # --- KPI RESUMEN ---
+            st.markdown("#### Resumen del periodo seleccionado")
+            kpis = st.columns(len(available_metrics))
+            for i, metric in enumerate(available_metrics):
+                total_val = df_filtered[metric].sum()
+                kpis[i].metric(label=metric, value=f"{int(total_val):,}")
+
+            # --- TABLA DATOS ---
+            with st.expander("Ver Datos Crudos"):
+                st.dataframe(df_filtered)
+        else:
+            st.warning("No hay datos disponibles con los filtros seleccionados.")
+
+    except Exception as e:
+        st.error(f"Error procesando el archivo: {e}")
+
+else:
+    st.info("👆 Sube tu archivo CSV único con columna de fecha/hora.")
