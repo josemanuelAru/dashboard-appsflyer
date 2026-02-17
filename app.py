@@ -2,109 +2,146 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
-st.set_page_config(page_title="Comparador de CSVs", layout="wide")
+# Configuración de la página
+st.set_page_config(page_title="Maquinillo vs Ivane", layout="wide")
 
-st.title("⚔️ Comparador de Reportes (Cruce de Datos)")
-st.markdown("Sube dos archivos diferentes y define sus equivalencias para comparar métricas.")
+st.title("⚔️ Comparador: Maquinillo vs Ivane")
+st.markdown("Sube los reportes para cruzar datos por día.")
 
-# --- PASO 1: SUBIR LOS DOS ARCHIVOS ---
-c1, c2 = st.columns(2)
-with c1:
-    file1 = st.file_uploader("📂 Archivo 1 (Izquierda)", type=["csv"], key="f1")
-with c2:
-    file2 = st.file_uploader("📂 Archivo 2 (Derecha)", type=["csv"], key="f2")
+# --- 1. ZONA DE CARGA (Dos columnas separadas) ---
+col_up1, col_up2 = st.columns(2)
 
-if file1 and file2:
+with col_up1:
+    st.subheader("📂 1. Datos del Maquinillo")
+    file_maq = st.file_uploader("Sube el CSV del Maquinillo", type=["csv"], key="maq")
+
+with col_up2:
+    st.subheader("📂 2. Datos de Ivane")
+    file_ivane = st.file_uploader("Sube el CSV de Ivane", type=["csv"], key="ivane")
+
+# --- LÓGICA DE PROCESAMIENTO ---
+if file_maq and file_ivane:
     try:
-        # Cargar archivos
-        df1 = pd.read_csv(file1)
-        df2 = pd.read_csv(file2)
-        
-        # Limpiar nombres de columnas (minúsculas y sin espacios) para facilitar lectura
-        df1.columns = df1.columns.str.strip()
-        df2.columns = df2.columns.str.strip()
+        # Cargar archivos (detectando separadores automáticamente si es posible)
+        df_m = pd.read_csv(file_maq)
+        df_i = pd.read_csv(file_ivane)
 
-        st.success(f"✅ Archivos cargados. Archivo 1: {len(df1)} filas | Archivo 2: {len(df2)} filas.")
+        st.success(f"✅ Archivos cargados. Maquinillo: {len(df_m)} filas | Ivane: {len(df_i)} filas.")
         st.markdown("---")
 
-        # --- PASO 2: DEFINIR EQUIVALENCIAS (KEYS) ---
-        st.subheader("1️⃣ Definir la columna en común (La Llave)")
-        st.info("Selecciona la columna que identifica lo mismo en ambos archivos (Ej: 'PID' en uno y 'Publisher_ID' en el otro).")
+        # --- 2. SINCRONIZACIÓN DE FECHAS ---
+        st.subheader("📅 Sincronizar Fechas")
+        st.info("Selecciona la columna que indica el DÍA en cada archivo para poder cruzarlos.")
 
-        col_key1, col_key2 = st.columns(2)
+        c_date1, c_date2 = st.columns(2)
         
-        with col_key1:
-            key1 = st.selectbox(f"Llave en {file1.name}:", df1.columns)
-        
-        with col_key2:
-            key2 = st.selectbox(f"Llave en {file2.name}:", df2.columns)
+        # Intentar adivinar la columna de fecha
+        def get_date_col_index(df):
+            cols = [c for c in df.columns if any(x in c.lower() for x in ['date', 'fecha', 'time', 'day', 'dia'])]
+            return df.columns.get_loc(cols[0]) if cols else 0
 
-        # --- PASO 3: HACER EL CRUCE (MERGE) ---
-        # Realizamos el 'merge' inner (solo lo que coincide en ambos)
-        # Añadimos sufijos _1 y _2 para distinguir columnas con el mismo nombre (ej: count_1, count_2)
-        df_merged = pd.merge(df1, df2, left_on=key1, right_on=key2, how='inner', suffixes=('_Archivo1', '_Archivo2'))
+        with c_date1:
+            date_col_m = st.selectbox("Fecha en Maquinillo:", df_m.columns, index=get_date_col_index(df_m))
         
-        if df_merged.empty:
-            st.error("❌ El cruce no generó resultados. No hay valores coincidentes en las columnas seleccionadas.")
-        else:
-            st.success(f"🔗 ¡Cruce exitoso! Se encontraron {len(df_merged)} coincidencias exactas.")
-            
-            # --- PASO 4: COMPARAR MÉTRICAS ---
-            st.markdown("---")
-            st.subheader("2️⃣ Comparativa Gráfica")
-            
-            # Identificar columnas numéricas para graficar
-            nums1 = df_merged.select_dtypes(include=['float', 'int']).columns.tolist()
-            
-            if not nums1:
-                st.warning("No se encontraron columnas numéricas para comparar.")
+        with c_date2:
+            date_col_i = st.selectbox("Fecha en Ivane:", df_i.columns, index=get_date_col_index(df_i))
+
+        # --- 3. PROCESAMIENTO Y LIMPIEZA ---
+        
+        # Función para limpiar números (quitar comas y convertir a float)
+        def clean_number(x):
+            if isinstance(x, str):
+                return float(x.replace(',', '').replace(' ', ''))
+            return float(x)
+
+        # Definir métricas esperadas
+        metrics_maq = ['cloudfront_ok_count', 'cloudfront_error_count', 'paced_count']
+        metrics_ivane = ['Aftrad IMPs', 'AF Blocked IMPs']
+
+        # --- PREPARAR MAQUINILLO ---
+        # Convertir fecha
+        df_m[date_col_m] = pd.to_datetime(df_m[date_col_m], errors='coerce').dt.date
+        
+        # Validar y limpiar métricas del Maquinillo
+        cols_found_m = []
+        for metric in metrics_maq:
+            # Buscar columna ignorando mayúsculas/minúsculas
+            match = next((c for c in df_m.columns if c.lower() == metric.lower()), None)
+            if match:
+                df_m[match] = df_m[match].apply(clean_number)
+                cols_found_m.append(match)
             else:
-                cg1, cg2, cg3 = st.columns(3)
-                
-                with cg1:
-                    metric_x = st.selectbox("Eje X (Dato del Archivo 1)", nums1, index=0)
-                with cg2:
-                    metric_y = st.selectbox("Eje Y (Dato del Archivo 2)", nums1, index=1 if len(nums1)>1 else 0)
-                with cg3:
-                    # Opcional: Color por categoría
-                    cat_cols = df_merged.select_dtypes(include=['object']).columns.tolist()
-                    color_col = st.selectbox("Color por (Opcional)", ["Ninguno"] + cat_cols)
+                st.warning(f"⚠️ No encontré '{metric}' en Maquinillo. (Columnas disponibles: {list(df_m.columns)})")
 
-                # Calcular la diferencia/discrepancia
-                df_merged['Diferencia'] = df_merged[metric_x] - df_merged[metric_y]
-                df_merged['% Discrepancia'] = ((df_merged[metric_x] - df_merged[metric_y]) / df_merged[metric_x]).fillna(0) * 100
+        # Agrupar Maquinillo por Día
+        if cols_found_m:
+            df_m_grouped = df_m.groupby(date_col_m)[cols_found_m].sum().reset_index()
+            # Renombrar columna fecha para el merge
+            df_m_grouped = df_m_grouped.rename(columns={date_col_m: 'Fecha'})
 
-                # --- GRÁFICA DE DISPERSIÓN (SCATTER) ---
-                # Es la mejor para comparar A vs B. Si los puntos están en la linea diagonal, coinciden perfecto.
-                fig = px.scatter(
-                    df_merged,
-                    x=metric_x,
-                    y=metric_y,
-                    color=None if color_col == "Ninguno" else color_col,
-                    hover_data=[key1, key2, 'Diferencia', '% Discrepancia'],
-                    title=f"Comparativa: {metric_x} vs {metric_y}",
-                    template="plotly_white"
+        # --- PREPARAR IVANE ---
+        # Convertir fecha
+        df_i[date_col_i] = pd.to_datetime(df_i[date_col_i], errors='coerce').dt.date
+
+        # Validar y limpiar métricas de Ivane
+        cols_found_i = []
+        for metric in metrics_ivane:
+            match = next((c for c in df_i.columns if c.lower() == metric.lower()), None)
+            if match:
+                df_i[match] = df_i[match].apply(clean_number)
+                cols_found_i.append(match)
+            else:
+                st.warning(f"⚠️ No encontré '{metric}' en Ivane. (Columnas disponibles: {list(df_i.columns)})")
+
+        # Agrupar Ivane por Día
+        if cols_found_i:
+            df_i_grouped = df_i.groupby(date_col_i)[cols_found_i].sum().reset_index()
+            df_i_grouped = df_i_grouped.rename(columns={date_col_i: 'Fecha'})
+
+        # --- 4. CRUCE DE DATOS (MERGE) ---
+        if cols_found_m and cols_found_i:
+            # Unir por la columna 'Fecha'
+            df_final = pd.merge(df_m_grouped, df_i_grouped, on='Fecha', how='outer').sort_values('Fecha')
+            
+            # Rellenar con 0 los días que falten en uno de los dos lados
+            df_final = df_final.fillna(0)
+
+            # --- 5. VISUALIZACIÓN ---
+            st.markdown("---")
+            st.markdown("### 📈 Gráfica Comparativa")
+
+            all_available_metrics = cols_found_m + cols_found_i
+
+            # Selector de métricas
+            selected_metrics = st.multiselect(
+                "Selecciona las métricas que quieres visualizar:",
+                options=all_available_metrics,
+                default=all_available_metrics # Por defecto marca todas
+            )
+
+            if selected_metrics:
+                # Crear gráfica
+                fig = px.line(
+                    df_final,
+                    x='Fecha',
+                    y=selected_metrics,
+                    markers=True,
+                    title="Evolución Diaria: Maquinillo vs Ivane",
+                    labels={'value': 'Cantidad', 'variable': 'Métrica'}
                 )
-                
-                # Añadir una línea diagonal de referencia (donde X = Y)
-                fig.add_shape(type="line",
-                    x0=min(df_merged[metric_x].min(), df_merged[metric_y].min()),
-                    y0=min(df_merged[metric_x].min(), df_merged[metric_y].min()),
-                    x1=max(df_merged[metric_x].max(), df_merged[metric_y].max()),
-                    y1=max(df_merged[metric_x].max(), df_merged[metric_y].max()),
-                    line=dict(color="Red", dash="dash"),
-                    opacity=0.5
-                )
-                
+                fig.update_layout(hovermode="x unified") # Tooltip comparativo
                 st.plotly_chart(fig, use_container_width=True)
-                st.caption("💡 La línea roja discontinua representa la coincidencia perfecta. Los puntos alejados son discrepancias.")
 
-            # --- TABLA DE DATOS CRUZADOS ---
-            with st.expander("Ver Tabla de Datos Cruzados y Discrepancias"):
-                st.dataframe(df_merged)
+                # Tabla de datos
+                with st.expander("Ver tabla de datos consolidados"):
+                    st.dataframe(df_final)
+            else:
+                st.info("Selecciona al menos una métrica para ver la gráfica.")
+        
+        else:
+            st.error("No se pudieron encontrar las métricas necesarias en los archivos. Revisa los nombres de las columnas.")
 
     except Exception as e:
         st.error(f"Error procesando los archivos: {e}")
-
 else:
-    st.info("👆 Sube dos archivos CSV para comenzar la comparativa.")
+    st.info("👆 Por favor sube ambos archivos para comenzar.")
