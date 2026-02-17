@@ -25,12 +25,21 @@ with tab_maq:
             df_m.columns = df_m.columns.str.lower().str.strip()
             
             # Fecha
-            col_date_m = st.selectbox("Columna Fecha (Maquinillo):", df_m.columns, key="date_m")
+            # Buscamos columnas de fecha comunes
+            cols_m = df_m.columns.tolist()
+            idx_date_m = 0
+            for i, col in enumerate(cols_m):
+                if any(x in col for x in ['date', 'fecha', 'time']):
+                    idx_date_m = i
+                    break
+            
+            col_date_m = st.selectbox("Columna Fecha (Maquinillo):", cols_m, index=idx_date_m, key="date_m")
+            
             try:
                 df_m[col_date_m] = pd.to_datetime(df_m[col_date_m])
                 df_m = df_m.sort_values(col_date_m)
             except:
-                st.warning("⚠️ Fecha no convertible. Se usará como texto.")
+                st.warning("⚠️ Fecha no convertible automáticamente. Se usará como texto.")
 
             # Filtros Maquinillo (Agency, Template, PID)
             st.markdown("##### 🔍 Filtros")
@@ -65,6 +74,7 @@ with tab_maq:
             avail_m = [c for c in metrics_m if c in df_m_filt.columns]
             
             if avail_m:
+                # Agrupar por fecha seleccionada
                 df_chart = df_m_filt.groupby(col_date_m)[avail_m].sum().reset_index()
                 st.plotly_chart(px.line(df_chart, x=col_date_m, y=avail_m, title="Evolución Maquinillo"), use_container_width=True)
             
@@ -75,7 +85,7 @@ with tab_maq:
             st.error(f"Error Maquinillo: {e}")
 
 # ==========================================
-# PESTAÑA 2: IVANE (RENOVADA)
+# PESTAÑA 2: IVANE (CORREGIDO)
 # ==========================================
 with tab_ivane:
     st.header("Análisis Ivane")
@@ -139,7 +149,7 @@ with tab_ivane:
             
             f1, f2, f3, f4 = st.columns(4)
             
-            # Filtros independientes (para que sea fácil de usar)
+            # Filtros independientes
             # PID
             opts_pid = sorted(df_i[col_pid].astype(str).unique())
             sel_pid = f1.multiselect("Filtrar PID", opts_pid, key="f_pid")
@@ -158,4 +168,53 @@ with tab_ivane:
 
             # Aplicar Filtros
             df_final = df_i.copy()
-            if sel_pid: df_final = df_
+            if sel_pid: df_final = df_final[df_final[col_pid].astype(str).isin(sel_pid)]
+            if sel_app: df_final = df_final[df_final[col_app].astype(str).isin(sel_app)]
+            if sel_adv: df_final = df_final[df_final[col_adv].astype(str).isin(sel_adv)]
+            if sel_agy: df_final = df_final[df_final[col_agency].astype(str).isin(sel_agy)]
+
+            # --- 4. GRÁFICA (Solo Aftrad IMPs y Blocked) ---
+            st.markdown("---")
+            st.subheader("📈 Evolución Diaria")
+            
+            # Agrupar por DÍA para la gráfica (sumando todo lo filtrado)
+            df_chart = df_final.groupby(col_date)[[col_imps, col_blocked]].sum().reset_index()
+            
+            if not df_chart.empty:
+                fig = px.line(
+                    df_chart, 
+                    x=col_date, 
+                    y=[col_imps, col_blocked], 
+                    markers=True,
+                    title="Tendencia de Impresiones (Aftrad vs Blocked)",
+                    labels={'value': 'Impresiones', 'variable': 'Métrica', col_date: 'Fecha'}
+                )
+                fig.update_layout(hovermode="x unified")
+                st.plotly_chart(fig, use_container_width=True)
+
+                # KPIs Totales
+                k1, k2 = st.columns(2)
+                k1.metric("Total Aftrad IMPs", f"{int(df_final[col_imps].sum()):,}")
+                k2.metric("Total AF Blocked IMPs", f"{int(df_final[col_blocked].sum()):,}")
+            else:
+                st.warning("No hay datos con los filtros seleccionados.")
+
+            # --- 5. TABLA DETALLADA (Día + Filtros) ---
+            st.markdown("---")
+            st.subheader("📋 Tabla de Datos Detallada")
+            st.markdown("Aquí puedes ver el desglose por día y por las columnas de filtro (PID, APP ID, ADV, Agency).")
+            
+            # Agrupar por Fecha + Dimensiones de Filtro
+            group_cols = [col_date, col_pid, col_app, col_adv, col_agency]
+            metric_cols = [col_imps, col_blocked]
+            
+            # Nos aseguramos de que las columnas existen y agrupamos
+            df_table = df_final.groupby(group_cols)[metric_cols].sum().reset_index()
+            
+            # Ordenar por fecha
+            df_table = df_table.sort_values(col_date, ascending=False)
+            
+            st.dataframe(df_table, use_container_width=True)
+
+        except Exception as e:
+            st.error(f"Error procesando Ivane: {e}")
