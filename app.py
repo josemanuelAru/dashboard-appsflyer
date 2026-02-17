@@ -11,8 +11,8 @@ st.title("📊 Dashboard de Reporte Appsflyer")
 @st.cache_data
 def load_data():
     try:
-        # Leemos el archivo renombrado como data.csv
-        df = pd.read_csv("data.csv")
+        # AQUÍ ESTÁ EL CAMBIO: Ahora lee "Data.csv" con mayúscula
+        df = pd.read_csv("Data.csv")
         
         # Limpieza y conversión de columnas numéricas
         cols_num = ['cloudfront_ok_count', 'cloudfront_error_count', 'paced_count', 'ok_ratio', 'paced_ratio']
@@ -29,7 +29,7 @@ def load_data():
             
         return df
     except FileNotFoundError:
-        st.error("⚠️ No se encontró el archivo 'data.csv'. Asegúrate de subirlo a GitHub con ese nombre exacto.")
+        st.error("⚠️ No se encontró el archivo 'Data.csv'. Asegúrate de que en GitHub el archivo empiece con mayúscula.")
         return pd.DataFrame()
 
 df = load_data()
