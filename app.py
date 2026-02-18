@@ -12,7 +12,7 @@ st.markdown("Herramienta de análisis separada por fuente de datos.")
 tab_maq, tab_ivane = st.tabs(["🤖 Reporte Maquinillo", "📋 Reporte Ivane"])
 
 # ==========================================
-# PESTAÑA 1: MAQUINILLO
+# PESTAÑA 1: MAQUINILLO (Sin cambios)
 # ==========================================
 with tab_maq:
     st.header("Análisis Maquinillo")
@@ -40,11 +40,10 @@ with tab_maq:
             except:
                 st.warning("⚠️ Fecha no convertible automáticamente. Se usará como texto.")
 
-            # Filtros Maquinillo (Agency, Template, PID)
+            # Filtros Maquinillo
             st.markdown("##### 🔍 Filtros")
             c1, c2, c3 = st.columns(3)
             
-            # Filtros dinámicos básicos
             sel_ag = []
             if 'agency' in df_m.columns:
                 sel_ag = c1.multiselect("Agency", sorted(df_m['agency'].astype(str).unique()), key="f_ag_m")
@@ -73,7 +72,6 @@ with tab_maq:
             avail_m = [c for c in metrics_m if c in df_m_filt.columns]
             
             if avail_m:
-                # Agrupar por fecha seleccionada
                 df_chart = df_m_filt.groupby(col_date_m)[avail_m].sum().reset_index()
                 st.plotly_chart(px.line(df_chart, x=col_date_m, y=avail_m, title="Evolución Maquinillo"), use_container_width=True)
             
@@ -84,7 +82,7 @@ with tab_maq:
             st.error(f"Error Maquinillo: {e}")
 
 # ==========================================
-# PESTAÑA 2: IVANE (ACTUALIZADA CON TOTAL)
+# PESTAÑA 2: IVANE (ACTUALIZADO: BLOCKED %)
 # ==========================================
 with tab_ivane:
     st.header("Análisis Ivane")
@@ -102,7 +100,7 @@ with tab_ivane:
             st.subheader("⚙️ Configuración de Columnas")
             cols = df_i.columns.tolist()
             
-            c_d, c_m1, c_m2 = st.columns(3)
+            c_d, c_m1, c_m2, c_m3 = st.columns(4)
             
             def find_idx(keywords):
                 for i, col in enumerate(cols):
@@ -113,12 +111,16 @@ with tab_ivane:
             idx_date = find_idx(['date', 'fecha', 'time', 'day'])
             col_date = c_d.selectbox("Columna Fecha:", cols, index=idx_date, key="date_i")
             
-            # Métricas Objetivo
+            # Métricas
             idx_imps = find_idx(['aftrad imps', 'imps', 'impressions'])
             col_imps = c_m1.selectbox("Col. Aftrad IMPs:", cols, index=idx_imps, key="c_imps")
             
-            idx_blocked = find_idx(['blocked', 'block', 'b. imps'])
-            col_blocked = c_m2.selectbox("Col. AF Blocked IMPs:", cols, index=idx_blocked, key="c_block")
+            idx_blocked = find_idx(['blocked imps', 'b. imps', 'af blocked imps'])
+            col_blocked = c_m2.selectbox("Col. Blocked IMPs:", cols, index=idx_blocked, key="c_block")
+            
+            # --- NUEVO: Columna Blocked % ---
+            idx_pct = find_idx(['blocked %', 'block %', 'rate', '%'])
+            col_pct = c_m3.selectbox("Col. Blocked %:", cols, index=idx_pct, key="c_pct")
 
             # Columnas de Filtro
             st.caption("Verifica las columnas de filtro:")
@@ -135,10 +137,14 @@ with tab_ivane:
             except:
                 st.warning("⚠️ Fecha tratada como texto.")
 
-            # Procesar Métricas
-            for col in [col_imps, col_blocked]:
+            # Procesar Métricas (Limpiar números y %)
+            for col in [col_imps, col_blocked, col_pct]:
                 if df_i[col].dtype == object:
-                    df_i[col] = pd.to_numeric(df_i[col].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
+                    # Quitamos comas y también el símbolo % si existe
+                    df_i[col] = pd.to_numeric(
+                        df_i[col].astype(str).str.replace(',', '').str.replace('%', ''), 
+                        errors='coerce'
+                    ).fillna(0)
 
             # --- 3. FILTROS ---
             st.markdown("---")
@@ -169,6 +175,7 @@ with tab_ivane:
             st.markdown("---")
             st.subheader("📈 Evolución Diaria")
             
+            # Para la gráfica sumamos IMPs
             df_chart = df_final.groupby(col_date)[[col_imps, col_blocked]].sum().reset_index()
             
             if not df_chart.empty:
@@ -183,30 +190,31 @@ with tab_ivane:
                 fig.update_layout(hovermode="x unified")
                 st.plotly_chart(fig, use_container_width=True)
 
-                k1, k2, k3 = st.columns(3)
-                total_imps = df_final[col_imps].sum()
-                total_blocked = df_final[col_blocked].sum()
-                k1.metric("Total Aftrad IMPs", f"{int(total_imps):,}")
-                k2.metric("Total AF Blocked IMPs", f"{int(total_blocked):,}")
-                k3.metric("Total COMBINADO", f"{int(total_imps + total_blocked):,}")
+                k1, k2 = st.columns(2)
+                k1.metric("Total Aftrad IMPs", f"{int(df_final[col_imps].sum()):,}")
+                k2.metric("Total AF Blocked IMPs", f"{int(df_final[col_blocked].sum()):,}")
             else:
                 st.warning("No hay datos con los filtros seleccionados.")
 
-            # --- 5. TABLA DETALLADA (CON COLUMNA TOTAL) ---
+            # --- 5. TABLA DETALLADA (Con Blocked %) ---
             st.markdown("---")
-            st.subheader("📋 Tabla de Datos Detallada (Con Total)")
+            st.subheader("📋 Tabla de Datos Detallada")
             
             group_cols = [col_date, col_pid, col_app, col_adv, col_agency]
-            metric_cols = [col_imps, col_blocked]
             
-            # Agrupar
-            df_table = df_final.groupby(group_cols)[metric_cols].sum().reset_index()
+            # Agrupamos: Sumamos las impresiones, pero hacemos la MEDIA del %
+            # (Porque sumar porcentajes no tiene sentido matemático)
+            df_table = df_final.groupby(group_cols).agg({
+                col_imps: 'sum',
+                col_blocked: 'sum',
+                col_pct: 'mean'
+            }).reset_index()
             
-            # --- AQUÍ ESTÁ EL CAMBIO: CALCULAR LA SUMA ---
-            df_table['TOTAL (Suma)'] = df_table[col_imps] + df_table[col_blocked]
-            
-            # Ordenar
+            # Ordenar por fecha
             df_table = df_table.sort_values(col_date, ascending=False)
+            
+            # Formatear visualmente el % (opcional, para que se vea bonito)
+            # df_table[col_pct] = df_table[col_pct].map('{:.2f}%'.format) 
             
             st.dataframe(df_table, use_container_width=True)
 
