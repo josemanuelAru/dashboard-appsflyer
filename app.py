@@ -83,8 +83,8 @@ with tab_maq:
             if sel_tp: df_m_filt = df_m_filt[df_m_filt['template'].isin(sel_tp)]
             if sel_pid: df_m_filt = df_m_filt[df_m_filt['pid'].isin(sel_pid)]
 
-            # Métricas y Gráfica
-            metrics_m = ['cloudfront_ok_count', 'cloudfront_error_count', 'paced_count']
+            # Métricas y Gráfica (Añadido http_error_count)
+            metrics_m = ['cloudfront_ok_count', 'cloudfront_error_count', 'http_error_count', 'paced_count']
             avail_m = [c for c in metrics_m if c in df_m_filt.columns]
             
             # Limpiar métricas
@@ -207,7 +207,8 @@ with tab_compare:
             # --- DATOS MAQUINILLO (YA FILTRADOS) ---
             # Sumamos las columnas directamente del dataframe filtrado
             m_ok = df_m_filt['cloudfront_ok_count'].sum() if 'cloudfront_ok_count' in df_m_filt.columns else 0
-            m_err = df_m_filt['cloudfront_error_count'].sum() if 'cloudfront_error_count' in df_m_filt.columns else 0
+            m_err_cf = df_m_filt['cloudfront_error_count'].sum() if 'cloudfront_error_count' in df_m_filt.columns else 0
+            m_err_http = df_m_filt['http_error_count'].sum() if 'http_error_count' in df_m_filt.columns else 0
             m_pace = df_m_filt['paced_count'].sum() if 'paced_count' in df_m_filt.columns else 0
 
             # --- DATOS IVANE (YA FILTRADOS) ---
@@ -221,13 +222,14 @@ with tab_compare:
             data_comp = {
                 'Métrica': [
                     'Maquinillo: OK Count', 
-                    'Maquinillo: Error Count', 
+                    'Maquinillo: Cloudfront Error Count', 
+                    'Maquinillo: HTTP Error Count', 
                     'Maquinillo: Paced Count', 
                     'Ivane: Aftrad IMPs', 
                     'Ivane: Blocked IMPs'
                 ],
-                'Total (Filtrado)': [m_ok, m_err, m_pace, i_imps, i_block],
-                'Fuente': ['Maquinillo', 'Maquinillo', 'Maquinillo', 'Ivane', 'Ivane']
+                'Total (Filtrado)': [m_ok, m_err_cf, m_err_http, m_pace, i_imps, i_block],
+                'Fuente': ['Maquinillo', 'Maquinillo', 'Maquinillo', 'Maquinillo', 'Ivane', 'Ivane']
             }
             
             df_comp_viz = pd.DataFrame(data_comp)
