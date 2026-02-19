@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import numpy as np # Importante para evitar errores matemáticos al calcular porcentajes
 
 # Configuración de la página
 st.set_page_config(page_title="Dashboard Global", layout="wide")
@@ -253,9 +254,6 @@ with tab_match:
             cols_im = df_i_match.columns.tolist()
 
             # 2. Mapeos Seguros para el cruce
-            # Creamos un diccionario para renombrar columnas a un nombre universal temporal
-            # Así evitamos el error de columnas duplicadas al hacer el merge
-            
             def find_col(keywords):
                 for col in cols_im:
                     if any(k in col.lower() for k in keywords): return col
@@ -287,9 +285,8 @@ with tab_match:
                 i_col_pid: 'Match_PID'
             }
 
-            # Agrupamos Maquinillo con sus llaves originales
+            # Agrupamos Maquinillo
             df_m_g = df_m_match.groupby(list(map_m.keys()))[avail_m_metrics].sum().reset_index()
-            # Renombramos a nombres temporales (Match_Agency, Match_App...)
             df_m_g = df_m_g.rename(columns=map_m)
 
             # Filtramos map_i para solo cruzar las llaves que sí existen en Maquinillo
@@ -298,10 +295,9 @@ with tab_match:
             
             # Agrupamos Ivane
             df_i_g = df_i_match.groupby(list(map_i_filtered.keys()))[[i_col_imps, i_col_block]].sum().reset_index()
-            # Renombramos
             df_i_g = df_i_g.rename(columns=map_i_filtered)
 
-            # Estandarizar strings a minúsculas para que el cruce sea 100% perfecto
+            # Estandarizar a minúsculas para cruce perfecto
             for c in keys_to_merge:
                 df_m_g[c] = df_m_g[c].astype(str).str.lower().str.strip()
                 df_i_g[c] = df_i_g[c].astype(str).str.lower().str.strip()
@@ -309,7 +305,7 @@ with tab_match:
             # 5. MERGE (CRUCE)
             df_merged = pd.merge(df_m_g, df_i_g, on=keys_to_merge, how='inner')
 
-            # Renombrar las columnas de "Match" a nombres finales y bonitos
+            # Renombrar columnas llaves al formato final
             rename_final = {
                 'Match_Agency': 'Agency',
                 'Match_App': 'App ID / Template',
@@ -317,11 +313,10 @@ with tab_match:
             }
             df_merged = df_merged.rename(columns=rename_final)
 
-            # --- ESTA SECCIÓN DE FILTROS AHORA FUNCIONARÁ PERFECTO ---
+            # 6. FILTROS EXCLUSIVOS DE ESTA PESTAÑA
             st.markdown("#### 🔍 Filtrar Tabla Cruzada")
             f_m1, f_m2, f_m3 = st.columns(3)
 
-            # Solo creamos el selector si la columna existe en el dataframe final
             sel_ag_match, sel_app_match, sel_pid_match = [], [], []
 
             if 'Agency' in df_merged.columns:
@@ -336,7 +331,7 @@ with tab_match:
                 opts_pid_match = sorted(df_merged['PID'].unique())
                 sel_pid_match = f_m3.multiselect("Filtrar PID", opts_pid_match, key="fm_pid")
 
-            # Aplicar filtros a la tabla final
+            # Aplicar filtros
             df_show = df_merged.copy()
             if sel_ag_match and 'Agency' in df_show.columns: 
                 df_show = df_show[df_show['Agency'].isin(sel_ag_match)]
@@ -345,12 +340,25 @@ with tab_match:
             if sel_pid_match and 'PID' in df_show.columns: 
                 df_show = df_show[df_show['PID'].isin(sel_pid_match)]
 
-            # Mostrar datos
+            # 7. CÁLCULO DEL PORCENTAJE (NUEVO)
+            col_pct_calc = '% Blocked vs OK'
+            if 'cloudfront_ok_count' in df_show.columns and i_col_block in df_show.columns:
+                # Calculamos el porcentaje dividiendo Blocked entre OK Count
+                # Usamos fillna(0) y replace(inf) por si el OK Count es 0 (para evitar errores de división por cero)
+                df_show[col_pct_calc] = (df_show[i_col_block] / df_show['cloudfront_ok_count'] * 100).fillna(0)
+                df_show[col_pct_calc] = df_show[col_pct_calc].replace([np.inf, -np.inf], 0).round(2)
+
+            # 8. MOSTRAR TABLA FINAL
             st.markdown(f"**Coincidencias exactas encontradas:** {len(df_show)} filas combinadas.")
             
-            # Ordenamos las columnas para que salgan primero las llaves y luego los números
+            # Ordenamos las columnas para que salgan en el orden correcto
             keys_existentes = [c for c in ['Agency', 'App ID / Template', 'PID'] if c in df_show.columns]
             columnas_finales = keys_existentes + avail_m_metrics + [i_col_imps, i_col_block]
+            
+            # Añadimos la columna del porcentaje calculada si existen sus dependencias
+            if 'cloudfront_ok_count' in df_show.columns and i_col_block in df_show.columns:
+                columnas_finales.append(col_pct_calc)
+                
             df_show = df_show[columnas_finales]
 
             st.dataframe(df_show, use_container_width=True)
