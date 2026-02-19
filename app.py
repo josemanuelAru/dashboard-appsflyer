@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import numpy as np # Importante para evitar errores matemáticos al calcular porcentajes
+import numpy as np
 
 # Configuración de la página
 st.set_page_config(page_title="Dashboard Global", layout="wide")
@@ -340,8 +340,8 @@ with tab_match:
             if sel_pid_match and 'PID' in df_show.columns: 
                 df_show = df_show[df_show['PID'].isin(sel_pid_match)]
 
-            # 7. CÁLCULO DEL PORCENTAJE (NUEVO)
-            col_pct_calc = '% Blocked vs OK'
+            # 7. CÁLCULO DEL PORCENTAJE
+            col_pct_calc = '% Bloqueado' # <-- AQUÍ ESTÁ EL CAMBIO
             if 'cloudfront_ok_count' in df_show.columns and i_col_block in df_show.columns:
                 # Calculamos el porcentaje dividiendo Blocked entre OK Count
                 # Usamos fillna(0) y replace(inf) por si el OK Count es 0 (para evitar errores de división por cero)
