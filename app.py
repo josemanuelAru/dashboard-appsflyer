@@ -242,7 +242,7 @@ with tab_match:
 
     if file_maq and file_ivane:
         try:
-            # 1. Leer archivos crudos de nuevo para asegurar que tenemos todo
+            # 1. Leer archivos crudos de nuevo
             file_maq.seek(0)
             df_m_match = pd.read_csv(file_maq)
             df_m_match.columns = df_m_match.columns.str.lower().str.strip()
@@ -252,7 +252,10 @@ with tab_match:
             df_i_match.columns = df_i_match.columns.str.strip()
             cols_im = df_i_match.columns.tolist()
 
-            # 2. Identificar columnas en Ivane
+            # 2. Mapeos Seguros para el cruce
+            # Creamos un diccionario para renombrar columnas a un nombre universal temporal
+            # Así evitamos el error de columnas duplicadas al hacer el merge
+            
             def find_col(keywords):
                 for col in cols_im:
                     if any(k in col.lower() for k in keywords): return col
@@ -264,64 +267,90 @@ with tab_match:
             i_col_imps = find_col(['aftrad imps', 'imps'])
             i_col_block = find_col(['blocked imps', 'blocked'])
 
-            # 3. Identificar columnas en Maquinillo
+            # 3. Métricas Maquinillo a cruzar
             m_metrics = ['cloudfront_ok_count', 'cloudfront_error_count', 'http_error_count', 'paced_count']
             avail_m_metrics = [c for c in m_metrics if c in df_m_match.columns]
             
-            # Limpiar números
-            for c in avail_m_metrics:
-                df_m_match[c] = clean_numeric_col(df_m_match[c])
-            for c in [i_col_imps, i_col_block]:
-                df_i_match[c] = clean_numeric_col(df_i_match[c])
+            # Limpieza numérica
+            for c in avail_m_metrics: df_m_match[c] = clean_numeric_col(df_m_match[c])
+            for c in [i_col_imps, i_col_block]: df_i_match[c] = clean_numeric_col(df_i_match[c])
 
-            # 4. Agrupar ambos por sus llaves para evitar duplicados
-            # Llaves Maquinillo: agency, template, pid
-            keys_m = [c for c in ['agency', 'template', 'pid'] if c in df_m_match.columns]
-            df_m_g = df_m_match.groupby(keys_m)[avail_m_metrics].sum().reset_index()
+            # 4. Agrupar, Renombrar Llaves y Estandarizar a Minúsculas
+            map_m = {}
+            if 'agency' in df_m_match.columns: map_m['agency'] = 'Match_Agency'
+            if 'template' in df_m_match.columns: map_m['template'] = 'Match_App'
+            if 'pid' in df_m_match.columns: map_m['pid'] = 'Match_PID'
             
-            # Llaves Ivane: agency, app id, pid
-            keys_i = [i_col_agy, i_col_app, i_col_pid]
-            df_i_g = df_i_match.groupby(keys_i)[[i_col_imps, i_col_block]].sum().reset_index()
+            map_i = {
+                i_col_agy: 'Match_Agency',
+                i_col_app: 'Match_App',
+                i_col_pid: 'Match_PID'
+            }
 
-            # Estandarizar las llaves a minúsculas para que el cruce sea perfecto (ej: Zilmtech == zilmtech)
-            for c in keys_m: df_m_g[c] = df_m_g[c].astype(str).str.lower().str.strip()
-            for c in keys_i: df_i_g[c] = df_i_g[c].astype(str).str.lower().str.strip()
+            # Agrupamos Maquinillo con sus llaves originales
+            df_m_g = df_m_match.groupby(list(map_m.keys()))[avail_m_metrics].sum().reset_index()
+            # Renombramos a nombres temporales (Match_Agency, Match_App...)
+            df_m_g = df_m_g.rename(columns=map_m)
 
-            # 5. HACER EL CRUCE (MERGE)
-            # left_on = keys de maquinillo | right_on = keys de ivane
-            df_merged = pd.merge(df_m_g, df_i_g, left_on=keys_m, right_on=keys_i, how='inner')
+            # Filtramos map_i para solo cruzar las llaves que sí existen en Maquinillo
+            keys_to_merge = list(map_m.values())
+            map_i_filtered = {k: v for k, v in map_i.items() if v in keys_to_merge}
+            
+            # Agrupamos Ivane
+            df_i_g = df_i_match.groupby(list(map_i_filtered.keys()))[[i_col_imps, i_col_block]].sum().reset_index()
+            # Renombramos
+            df_i_g = df_i_g.rename(columns=map_i_filtered)
 
-            # Renombrar las columnas llaves para que queden limpias
-            df_merged = df_merged.rename(columns={
-                'agency': 'Agency',
-                'template': 'App ID / Template',
-                'pid': 'PID'
-            })
+            # Estandarizar strings a minúsculas para que el cruce sea 100% perfecto
+            for c in keys_to_merge:
+                df_m_g[c] = df_m_g[c].astype(str).str.lower().str.strip()
+                df_i_g[c] = df_i_g[c].astype(str).str.lower().str.strip()
 
-            # 6. FILTROS EXCLUSIVOS DE ESTA PESTAÑA
+            # 5. MERGE (CRUCE)
+            df_merged = pd.merge(df_m_g, df_i_g, on=keys_to_merge, how='inner')
+
+            # Renombrar las columnas de "Match" a nombres finales y bonitos
+            rename_final = {
+                'Match_Agency': 'Agency',
+                'Match_App': 'App ID / Template',
+                'Match_PID': 'PID'
+            }
+            df_merged = df_merged.rename(columns=rename_final)
+
+            # --- ESTA SECCIÓN DE FILTROS AHORA FUNCIONARÁ PERFECTO ---
             st.markdown("#### 🔍 Filtrar Tabla Cruzada")
             f_m1, f_m2, f_m3 = st.columns(3)
 
-            opts_ag_match = sorted(df_merged['Agency'].unique())
-            sel_ag_match = f_m1.multiselect("Filtrar Agency", opts_ag_match, key="fm_ag")
+            # Solo creamos el selector si la columna existe en el dataframe final
+            sel_ag_match, sel_app_match, sel_pid_match = [], [], []
 
-            opts_app_match = sorted(df_merged['App ID / Template'].unique())
-            sel_app_match = f_m2.multiselect("Filtrar App ID", opts_app_match, key="fm_app")
-
-            opts_pid_match = sorted(df_merged['PID'].unique())
-            sel_pid_match = f_m3.multiselect("Filtrar PID", opts_pid_match, key="fm_pid")
-
-            # Aplicar filtros
-            df_show = df_merged.copy()
-            if sel_ag_match: df_show = df_show[df_show['Agency'].isin(sel_ag_match)]
-            if sel_app_match: df_show = df_show[df_show['App ID / Template'].isin(sel_app_match)]
-            if sel_pid_match: df_show = df_show[df_show['PID'].isin(sel_pid_match)]
-
-            # 7. MOSTRAR TABLA FINAL
-            st.markdown(f"**Coincidencias encontradas:** {len(df_show)} filas combinadas.")
+            if 'Agency' in df_merged.columns:
+                opts_ag_match = sorted(df_merged['Agency'].unique())
+                sel_ag_match = f_m1.multiselect("Filtrar Agency", opts_ag_match, key="fm_ag")
             
-            # Ordenar columnas visualmente
-            columnas_finales = ['Agency', 'App ID / Template', 'PID'] + avail_m_metrics + [i_col_imps, i_col_block]
+            if 'App ID / Template' in df_merged.columns:
+                opts_app_match = sorted(df_merged['App ID / Template'].unique())
+                sel_app_match = f_m2.multiselect("Filtrar App ID", opts_app_match, key="fm_app")
+
+            if 'PID' in df_merged.columns:
+                opts_pid_match = sorted(df_merged['PID'].unique())
+                sel_pid_match = f_m3.multiselect("Filtrar PID", opts_pid_match, key="fm_pid")
+
+            # Aplicar filtros a la tabla final
+            df_show = df_merged.copy()
+            if sel_ag_match and 'Agency' in df_show.columns: 
+                df_show = df_show[df_show['Agency'].isin(sel_ag_match)]
+            if sel_app_match and 'App ID / Template' in df_show.columns: 
+                df_show = df_show[df_show['App ID / Template'].isin(sel_app_match)]
+            if sel_pid_match and 'PID' in df_show.columns: 
+                df_show = df_show[df_show['PID'].isin(sel_pid_match)]
+
+            # Mostrar datos
+            st.markdown(f"**Coincidencias exactas encontradas:** {len(df_show)} filas combinadas.")
+            
+            # Ordenamos las columnas para que salgan primero las llaves y luego los números
+            keys_existentes = [c for c in ['Agency', 'App ID / Template', 'PID'] if c in df_show.columns]
+            columnas_finales = keys_existentes + avail_m_metrics + [i_col_imps, i_col_block]
             df_show = df_show[columnas_finales]
 
             st.dataframe(df_show, use_container_width=True)
