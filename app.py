@@ -25,14 +25,18 @@ def clean_numeric_col(series):
 # Inicializamos variables globales para compartir datos entre pestañas
 df_m_filt = None
 df_i_filt = None
-# Variables para guardar los nombres de las columnas seleccionadas en Ivane
 ivane_col_imps = None
 ivane_col_blocked = None
 
 # ==========================================
-# PESTAÑAS
+# PESTAÑAS (Ahora son 4)
 # ==========================================
-tab_maq, tab_ivane, tab_compare = st.tabs(["🤖 Análisis Maquinillo", "📋 Análisis Ivane", "⚖️ Comparativa (Filtrada)"])
+tab_maq, tab_ivane, tab_compare, tab_match = st.tabs([
+    "🤖 Análisis Maquinillo", 
+    "📋 Análisis Ivane", 
+    "⚖️ Comparativa (Filtrada)",
+    "🔗 Cruce de Datos (Match)"
+])
 
 # ==========================================
 # PESTAÑA 1: MAQUINILLO (CON FECHA)
@@ -45,19 +49,16 @@ with tab_maq:
             df_m.columns = df_m.columns.str.lower().str.strip()
             
             st.markdown("### 🗓️ Configuración Maquinillo")
-            # Selección de Fecha
             cols_m = df_m.columns.tolist()
             idx_date = next((i for i, c in enumerate(cols_m) if any(x in c for x in ['date', 'fecha', 'time'])), 0)
             col_date_m = st.selectbox("Columna Fecha:", cols_m, index=idx_date, key="d_m")
             
-            # Convertir Fecha
             try:
                 df_m[col_date_m] = pd.to_datetime(df_m[col_date_m])
                 df_m = df_m.sort_values(col_date_m)
             except:
                 st.warning("⚠️ Fecha no convertible. Se usará como texto.")
 
-            # Filtros
             st.markdown("#### 🔍 Filtros Maquinillo")
             c1, c2, c3 = st.columns(3)
             
@@ -77,17 +78,14 @@ with tab_maq:
                 if sel_tp: temp = temp[temp['template'].isin(sel_tp)]
                 sel_pid = c3.multiselect("PID", sorted(temp['pid'].astype(str).unique()), key="f_pid_m")
 
-            # Aplicar Filtros (Guardamos en df_m_filt para usarlo luego)
             df_m_filt = df_m.copy()
             if sel_ag: df_m_filt = df_m_filt[df_m_filt['agency'].isin(sel_ag)]
             if sel_tp: df_m_filt = df_m_filt[df_m_filt['template'].isin(sel_tp)]
             if sel_pid: df_m_filt = df_m_filt[df_m_filt['pid'].isin(sel_pid)]
 
-            # Métricas y Gráfica (Añadido http_error_count)
             metrics_m = ['cloudfront_ok_count', 'cloudfront_error_count', 'http_error_count', 'paced_count']
             avail_m = [c for c in metrics_m if c in df_m_filt.columns]
             
-            # Limpiar métricas
             for col in avail_m:
                 df_m_filt[col] = clean_numeric_col(df_m_filt[col])
 
@@ -95,7 +93,6 @@ with tab_maq:
             st.info(f"Mostrando datos filtrados: {len(df_m_filt)} registros.")
             
             if avail_m:
-                # Gráfica Temporal
                 df_chart = df_m_filt.groupby(col_date_m)[avail_m].sum().reset_index()
                 st.plotly_chart(px.line(df_chart, x=col_date_m, y=avail_m, title="Evolución Temporal Maquinillo"), use_container_width=True)
             
@@ -119,8 +116,6 @@ with tab_ivane:
             cols_i = df_i.columns.tolist()
 
             st.markdown("### 🔢 Configuración Ivane")
-            
-            # Mapeo de columnas
             c_m1, c_m2, c_m3 = st.columns(3)
             
             def find_idx(keywords):
@@ -128,12 +123,10 @@ with tab_ivane:
                     if any(k in col.lower() for k in keywords): return i
                 return 0
 
-            # Guardamos los nombres de las columnas en variables globales
             ivane_col_imps = c_m1.selectbox("Col. Aftrad IMPs:", cols_i, index=find_idx(['aftrad imps', 'imps']), key="c_imps")
             ivane_col_blocked = c_m2.selectbox("Col. Blocked IMPs:", cols_i, index=find_idx(['blocked imps', 'blocked']), key="c_block")
             col_pct = c_m3.selectbox("Col. Blocked %:", cols_i, index=find_idx(['%', 'rate']), key="c_pct")
             
-            # Columnas filtro
             st.markdown("##### Columnas de Agrupación")
             c_f1, c_f2, c_f3, c_f4 = st.columns(4)
             col_pid = c_f1.selectbox("PID", cols_i, index=find_idx(['pid', 'site']), key="cp_i")
@@ -141,11 +134,9 @@ with tab_ivane:
             col_adv = c_f3.selectbox("ADV", cols_i, index=find_idx(['adv']), key="cv_i")
             col_agy = c_f4.selectbox("Agency", cols_i, index=find_idx(['agency', 'partner']), key="cg_i")
 
-            # Procesamiento Números
             for c in [ivane_col_imps, ivane_col_blocked, col_pct]:
                 df_i[c] = clean_numeric_col(df_i[c])
 
-            # Filtros
             st.markdown("#### 🔍 Filtros Ivane")
             f1, f2, f3, f4 = st.columns(4)
             sel_pid_i = f1.multiselect("PID", sorted(df_i[col_pid].astype(str).unique()), key="fp_i")
@@ -153,7 +144,6 @@ with tab_ivane:
             sel_adv_i = f3.multiselect("ADV", sorted(df_i[col_adv].astype(str).unique()), key="fv_i")
             sel_agy_i = f4.multiselect("Agency", sorted(df_i[col_agy].astype(str).unique()), key="fg_i")
 
-            # Aplicar Filtros (Guardamos en df_i_filt)
             df_i_filt = df_i.copy()
             if sel_pid_i: df_i_filt = df_i_filt[df_i_filt[col_pid].astype(str).isin(sel_pid_i)]
             if sel_app_i: df_i_filt = df_i_filt[df_i_filt[col_app].astype(str).isin(sel_app_i)]
@@ -163,7 +153,6 @@ with tab_ivane:
             st.markdown("---")
             st.info(f"Mostrando datos filtrados: {len(df_i_filt)} registros.")
 
-            # --- VISUALIZACIÓN DE TOTALES ---
             st.subheader("Totales Generales (Filtrados)")
             k1, k2, k3 = st.columns(3)
             total_imps = df_i_filt[ivane_col_imps].sum()
@@ -174,7 +163,6 @@ with tab_ivane:
             k2.metric("Total Blocked IMPs", f"{int(total_block):,}")
             k3.metric("Blocked % Promedio", f"{avg_pct:.2f}%")
 
-            # Tabla Detallada
             st.markdown("##### 📋 Tabla Detallada")
             group_cols = [col_pid, col_app, col_adv, col_agy]
             df_table_i = df_i_filt.groupby(group_cols).agg({
@@ -196,7 +184,6 @@ with tab_ivane:
 with tab_compare:
     st.header("⚖️ Comparativa de Totales (Filtrada)")
     
-    # Verificamos si los Dataframes filtrados existen y no están vacíos
     has_maq_data = df_m_filt is not None and not df_m_filt.empty
     has_ivane_data = df_i_filt is not None and not df_i_filt.empty
     
@@ -204,25 +191,18 @@ with tab_compare:
         try:
             st.success("✅ Usando los datos filtrados de las pestañas anteriores.")
             
-            # --- DATOS MAQUINILLO (YA FILTRADOS) ---
-            # Sumamos las columnas directamente del dataframe filtrado
             m_ok = df_m_filt['cloudfront_ok_count'].sum() if 'cloudfront_ok_count' in df_m_filt.columns else 0
             m_err_cf = df_m_filt['cloudfront_error_count'].sum() if 'cloudfront_error_count' in df_m_filt.columns else 0
             m_err_http = df_m_filt['http_error_count'].sum() if 'http_error_count' in df_m_filt.columns else 0
             m_pace = df_m_filt['paced_count'].sum() if 'paced_count' in df_m_filt.columns else 0
 
-            # --- DATOS IVANE (YA FILTRADOS) ---
-            # Usamos los nombres de columna que el usuario eligió en la pestaña 2
             i_imps = df_i_filt[ivane_col_imps].sum() if ivane_col_imps else 0
             i_block = df_i_filt[ivane_col_blocked].sum() if ivane_col_blocked else 0
-
-            # --- VISUALIZACIÓN COMPARATIVA ---
             
-            # Crear DataFrame Resumen
             data_comp = {
                 'Métrica': [
                     'Maquinillo: OK Count', 
-                    'Maquinillo: Cloudfront Error Count', 
+                    'Maquinillo: CF Error Count', 
                     'Maquinillo: HTTP Error Count', 
                     'Maquinillo: Paced Count', 
                     'Ivane: Aftrad IMPs', 
@@ -234,7 +214,6 @@ with tab_compare:
             
             df_comp_viz = pd.DataFrame(data_comp)
 
-            # Gráfica de Barras Comparativa
             st.subheader("📊 Gráfica de Volúmenes (Datos Filtrados)")
             fig_comp = px.bar(
                 df_comp_viz, 
@@ -246,16 +225,108 @@ with tab_compare:
             )
             st.plotly_chart(fig_comp, use_container_width=True)
 
-            # Tabla Resumen
             st.subheader("📋 Tabla de Datos Consolidados")
             st.dataframe(df_comp_viz, use_container_width=True)
 
         except Exception as e:
             st.error(f"Error en la comparativa: {e}")
-            
     else:
         st.warning("⚠️ Esperando datos... Asegúrate de subir archivos y de que los filtros seleccionados no dejen los datos vacíos.")
-        if not has_maq_data:
-            st.caption("- Faltan datos de Maquinillo (revisa Pestaña 1).")
-        if not has_ivane_data:
-            st.caption("- Faltan datos de Ivane (revisa Pestaña 2).")
+
+# ==========================================
+# PESTAÑA 4: CRUCE DE DATOS (MATCH EXACTO)
+# ==========================================
+with tab_match:
+    st.header("🔗 Cruce de Datos (Maquinillo 🤝 Ivane)")
+    st.markdown("Esta tabla une los registros donde **Agency, Template/App ID y PID coinciden exactamente** en ambos archivos.")
+
+    if file_maq and file_ivane:
+        try:
+            # 1. Leer archivos crudos de nuevo para asegurar que tenemos todo
+            file_maq.seek(0)
+            df_m_match = pd.read_csv(file_maq)
+            df_m_match.columns = df_m_match.columns.str.lower().str.strip()
+            
+            file_ivane.seek(0)
+            df_i_match = pd.read_csv(file_ivane)
+            df_i_match.columns = df_i_match.columns.str.strip()
+            cols_im = df_i_match.columns.tolist()
+
+            # 2. Identificar columnas en Ivane
+            def find_col(keywords):
+                for col in cols_im:
+                    if any(k in col.lower() for k in keywords): return col
+                return cols_im[0]
+
+            i_col_pid = find_col(['pid', 'site'])
+            i_col_app = find_col(['app', 'bundle'])
+            i_col_agy = find_col(['agency', 'partner'])
+            i_col_imps = find_col(['aftrad imps', 'imps'])
+            i_col_block = find_col(['blocked imps', 'blocked'])
+
+            # 3. Identificar columnas en Maquinillo
+            m_metrics = ['cloudfront_ok_count', 'cloudfront_error_count', 'http_error_count', 'paced_count']
+            avail_m_metrics = [c for c in m_metrics if c in df_m_match.columns]
+            
+            # Limpiar números
+            for c in avail_m_metrics:
+                df_m_match[c] = clean_numeric_col(df_m_match[c])
+            for c in [i_col_imps, i_col_block]:
+                df_i_match[c] = clean_numeric_col(df_i_match[c])
+
+            # 4. Agrupar ambos por sus llaves para evitar duplicados
+            # Llaves Maquinillo: agency, template, pid
+            keys_m = [c for c in ['agency', 'template', 'pid'] if c in df_m_match.columns]
+            df_m_g = df_m_match.groupby(keys_m)[avail_m_metrics].sum().reset_index()
+            
+            # Llaves Ivane: agency, app id, pid
+            keys_i = [i_col_agy, i_col_app, i_col_pid]
+            df_i_g = df_i_match.groupby(keys_i)[[i_col_imps, i_col_block]].sum().reset_index()
+
+            # Estandarizar las llaves a minúsculas para que el cruce sea perfecto (ej: Zilmtech == zilmtech)
+            for c in keys_m: df_m_g[c] = df_m_g[c].astype(str).str.lower().str.strip()
+            for c in keys_i: df_i_g[c] = df_i_g[c].astype(str).str.lower().str.strip()
+
+            # 5. HACER EL CRUCE (MERGE)
+            # left_on = keys de maquinillo | right_on = keys de ivane
+            df_merged = pd.merge(df_m_g, df_i_g, left_on=keys_m, right_on=keys_i, how='inner')
+
+            # Renombrar las columnas llaves para que queden limpias
+            df_merged = df_merged.rename(columns={
+                'agency': 'Agency',
+                'template': 'App ID / Template',
+                'pid': 'PID'
+            })
+
+            # 6. FILTROS EXCLUSIVOS DE ESTA PESTAÑA
+            st.markdown("#### 🔍 Filtrar Tabla Cruzada")
+            f_m1, f_m2, f_m3 = st.columns(3)
+
+            opts_ag_match = sorted(df_merged['Agency'].unique())
+            sel_ag_match = f_m1.multiselect("Filtrar Agency", opts_ag_match, key="fm_ag")
+
+            opts_app_match = sorted(df_merged['App ID / Template'].unique())
+            sel_app_match = f_m2.multiselect("Filtrar App ID", opts_app_match, key="fm_app")
+
+            opts_pid_match = sorted(df_merged['PID'].unique())
+            sel_pid_match = f_m3.multiselect("Filtrar PID", opts_pid_match, key="fm_pid")
+
+            # Aplicar filtros
+            df_show = df_merged.copy()
+            if sel_ag_match: df_show = df_show[df_show['Agency'].isin(sel_ag_match)]
+            if sel_app_match: df_show = df_show[df_show['App ID / Template'].isin(sel_app_match)]
+            if sel_pid_match: df_show = df_show[df_show['PID'].isin(sel_pid_match)]
+
+            # 7. MOSTRAR TABLA FINAL
+            st.markdown(f"**Coincidencias encontradas:** {len(df_show)} filas combinadas.")
+            
+            # Ordenar columnas visualmente
+            columnas_finales = ['Agency', 'App ID / Template', 'PID'] + avail_m_metrics + [i_col_imps, i_col_block]
+            df_show = df_show[columnas_finales]
+
+            st.dataframe(df_show, use_container_width=True)
+
+        except Exception as e:
+            st.error(f"Error realizando el cruce de datos: {e}")
+    else:
+        st.info("👈 Sube AMBOS archivos en la barra lateral para poder cruzarlos.")
