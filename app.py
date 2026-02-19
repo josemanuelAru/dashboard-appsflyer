@@ -65,6 +65,7 @@ with tab_match:
             i_col_pid = find_col(['pid', 'site'])
             i_col_app = find_col(['app', 'bundle'])
             i_col_agy = find_col(['agency', 'partner'])
+            i_col_adv = find_col(['adv', 'advertiser']) # <-- Buscamos ADV
             i_col_imps = find_col(['aftrad imps', 'imps'])
             i_col_block = find_col(['blocked imps', 'blocked'])
 
@@ -96,11 +97,16 @@ with tab_match:
             keys_to_merge = list(map_m.values())
             map_i_filtered = {k: v for k, v in map_i.items() if v in keys_to_merge}
             
-            # Agrupamos Ivane
-            df_i_g = df_i_match.groupby(list(map_i_filtered.keys()))[[i_col_imps, i_col_block]].sum().reset_index()
+            # Agrupamos Ivane (Añadiendo ADV a la agrupación para no perderlo)
+            keys_i_group = list(map_i_filtered.keys())
+            if i_col_adv not in keys_i_group:
+                keys_i_group.append(i_col_adv)
+                
+            df_i_g = df_i_match.groupby(keys_i_group)[[i_col_imps, i_col_block]].sum().reset_index()
             df_i_g = df_i_g.rename(columns=map_i_filtered)
+            df_i_g = df_i_g.rename(columns={i_col_adv: 'ADV'}) # Renombramos la columna a 'ADV'
 
-            # Estandarizar a minúsculas para cruce perfecto
+            # Estandarizar a minúsculas para cruce perfecto (solo las llaves de cruce)
             for c in keys_to_merge:
                 df_m_g[c] = df_m_g[c].astype(str).str.lower().str.strip()
                 df_i_g[c] = df_i_g[c].astype(str).str.lower().str.strip()
@@ -116,26 +122,32 @@ with tab_match:
             }
             df_merged = df_merged.rename(columns=rename_final)
 
-            # 6. FILTROS EXCLUSIVOS
+            # 6. FILTROS EXCLUSIVOS (Añadido ADV)
             st.markdown("#### 🔍 Filtrar Datos")
-            f_m1, f_m2, f_m3 = st.columns(3)
+            f_m1, f_m2, f_m3, f_m4 = st.columns(4)
 
-            sel_ag_match, sel_app_match, sel_pid_match = [], [], []
+            sel_adv_match, sel_ag_match, sel_app_match, sel_pid_match = [], [], [], []
+
+            if 'ADV' in df_merged.columns:
+                opts_adv_match = sorted(df_merged['ADV'].astype(str).unique())
+                sel_adv_match = f_m1.multiselect("Filtrar ADV", opts_adv_match, key="fm_adv")
 
             if 'Agency' in df_merged.columns:
                 opts_ag_match = sorted(df_merged['Agency'].unique())
-                sel_ag_match = f_m1.multiselect("Filtrar Agency", opts_ag_match, key="fm_ag")
+                sel_ag_match = f_m2.multiselect("Filtrar Agency", opts_ag_match, key="fm_ag")
             
             if 'App ID / Template' in df_merged.columns:
                 opts_app_match = sorted(df_merged['App ID / Template'].unique())
-                sel_app_match = f_m2.multiselect("Filtrar App ID", opts_app_match, key="fm_app")
+                sel_app_match = f_m3.multiselect("Filtrar App ID", opts_app_match, key="fm_app")
 
             if 'PID' in df_merged.columns:
                 opts_pid_match = sorted(df_merged['PID'].unique())
-                sel_pid_match = f_m3.multiselect("Filtrar PID", opts_pid_match, key="fm_pid")
+                sel_pid_match = f_m4.multiselect("Filtrar PID", opts_pid_match, key="fm_pid")
 
             # Aplicar filtros
             df_show = df_merged.copy()
+            if sel_adv_match and 'ADV' in df_show.columns: 
+                df_show = df_show[df_show['ADV'].astype(str).isin(sel_adv_match)]
             if sel_ag_match and 'Agency' in df_show.columns: 
                 df_show = df_show[df_show['Agency'].isin(sel_ag_match)]
             if sel_app_match and 'App ID / Template' in df_show.columns: 
@@ -152,8 +164,8 @@ with tab_match:
             # 8. MOSTRAR TABLA FINAL
             st.markdown(f"**Coincidencias exactas encontradas:** {len(df_show)} filas combinadas.")
             
-            # Ordenamos las columnas
-            keys_existentes = [c for c in ['Agency', 'App ID / Template', 'PID'] if c in df_show.columns]
+            # Ordenamos las columnas poniendo ADV primero
+            keys_existentes = [c for c in ['ADV', 'Agency', 'App ID / Template', 'PID'] if c in df_show.columns]
             columnas_finales = keys_existentes + avail_m_metrics + [i_col_imps, i_col_block]
             
             if 'cloudfront_ok_count' in df_show.columns and i_col_block in df_show.columns:
