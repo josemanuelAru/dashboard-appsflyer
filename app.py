@@ -157,14 +157,14 @@ with tab_match:
 
             # 7. CÁLCULO DE LOS PORCENTAJES
             col_pct_calc = '% Bloqueado'
-            col_pct_maq_calc = '% bloqueado Maquinillo'
+            col_pct_maq_calc = '%Correcto Maquinillo' # <-- CAMBIO APLICADO AQUÍ
             
             # % Bloqueado original (Blocked IMPs vs cloudfront_ok_count)
             if 'cloudfront_ok_count' in df_show.columns and i_col_block in df_show.columns:
                 df_show[col_pct_calc] = (df_show[i_col_block] / df_show['cloudfront_ok_count'] * 100).fillna(0)
                 df_show[col_pct_calc] = df_show[col_pct_calc].replace([np.inf, -np.inf], 0).round(2)
 
-            # NUEVO % bloqueado Maquinillo (cloudfront_ok_count vs Aftrad IMPs)
+            # NUEVO %Correcto Maquinillo (cloudfront_ok_count vs Aftrad IMPs)
             if 'cloudfront_ok_count' in df_show.columns and i_col_imps in df_show.columns:
                 df_show[col_pct_maq_calc] = (df_show['cloudfront_ok_count'] / df_show[i_col_imps] * 100).fillna(0)
                 df_show[col_pct_maq_calc] = df_show[col_pct_maq_calc].replace([np.inf, -np.inf], 0).round(2)
