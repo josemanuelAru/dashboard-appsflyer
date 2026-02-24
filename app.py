@@ -65,7 +65,7 @@ with tab_match:
             i_col_pid = find_col(['pid', 'site'])
             i_col_app = find_col(['app', 'bundle'])
             i_col_agy = find_col(['agency', 'partner'])
-            i_col_adv = find_col(['adv', 'advertiser']) # <-- Buscamos ADV
+            i_col_adv = find_col(['adv', 'advertiser'])
             i_col_imps = find_col(['aftrad imps', 'imps'])
             i_col_block = find_col(['blocked imps', 'blocked'])
 
@@ -106,7 +106,7 @@ with tab_match:
             df_i_g = df_i_g.rename(columns=map_i_filtered)
             df_i_g = df_i_g.rename(columns={i_col_adv: 'ADV'}) # Renombramos la columna a 'ADV'
 
-            # Estandarizar a minúsculas para cruce perfecto (solo las llaves de cruce)
+            # Estandarizar a minúsculas para cruce perfecto
             for c in keys_to_merge:
                 df_m_g[c] = df_m_g[c].astype(str).str.lower().str.strip()
                 df_i_g[c] = df_i_g[c].astype(str).str.lower().str.strip()
@@ -122,7 +122,7 @@ with tab_match:
             }
             df_merged = df_merged.rename(columns=rename_final)
 
-            # 6. FILTROS EXCLUSIVOS (Añadido ADV)
+            # 6. FILTROS EXCLUSIVOS
             st.markdown("#### 🔍 Filtrar Datos")
             f_m1, f_m2, f_m3, f_m4 = st.columns(4)
 
@@ -155,11 +155,19 @@ with tab_match:
             if sel_pid_match and 'PID' in df_show.columns: 
                 df_show = df_show[df_show['PID'].isin(sel_pid_match)]
 
-            # 7. CÁLCULO DEL PORCENTAJE
+            # 7. CÁLCULO DE LOS PORCENTAJES
             col_pct_calc = '% Bloqueado'
+            col_pct_maq_calc = '% bloqueado Maquinillo'
+            
+            # % Bloqueado original (Blocked IMPs vs cloudfront_ok_count)
             if 'cloudfront_ok_count' in df_show.columns and i_col_block in df_show.columns:
                 df_show[col_pct_calc] = (df_show[i_col_block] / df_show['cloudfront_ok_count'] * 100).fillna(0)
                 df_show[col_pct_calc] = df_show[col_pct_calc].replace([np.inf, -np.inf], 0).round(2)
+
+            # NUEVO % bloqueado Maquinillo (cloudfront_ok_count vs Aftrad IMPs)
+            if 'cloudfront_ok_count' in df_show.columns and i_col_imps in df_show.columns:
+                df_show[col_pct_maq_calc] = (df_show['cloudfront_ok_count'] / df_show[i_col_imps] * 100).fillna(0)
+                df_show[col_pct_maq_calc] = df_show[col_pct_maq_calc].replace([np.inf, -np.inf], 0).round(2)
 
             # 8. MOSTRAR TABLA FINAL
             st.markdown(f"**Coincidencias exactas encontradas:** {len(df_show)} filas combinadas.")
@@ -168,8 +176,12 @@ with tab_match:
             keys_existentes = [c for c in ['ADV', 'Agency', 'App ID / Template', 'PID'] if c in df_show.columns]
             columnas_finales = keys_existentes + avail_m_metrics + [i_col_imps, i_col_block]
             
+            # Añadimos los porcentajes si las columnas existen
             if 'cloudfront_ok_count' in df_show.columns and i_col_block in df_show.columns:
                 columnas_finales.append(col_pct_calc)
+                
+            if 'cloudfront_ok_count' in df_show.columns and i_col_imps in df_show.columns:
+                columnas_finales.append(col_pct_maq_calc)
                 
             df_show = df_show[columnas_finales]
 
