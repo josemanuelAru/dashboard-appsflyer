@@ -155,16 +155,20 @@ with tab_match:
             if sel_pid_match and 'PID' in df_show.columns: 
                 df_show = df_show[df_show['PID'].isin(sel_pid_match)]
 
-            # 7. CÁLCULO DE LOS PORCENTAJES
+            # 7. CÁLCULOS (PORCENTAJES Y RESTAS)
             col_pct_calc = '% Bloqueado'
-            col_pct_maq_calc = '%Correcto Maquinillo' # <-- CAMBIO APLICADO AQUÍ
+            col_pct_maq_calc = '%Correcto Maquinillo'
+            col_trafico_af = 'Trafico en AF' # <-- NUEVA COLUMNA
             
-            # % Bloqueado original (Blocked IMPs vs cloudfront_ok_count)
             if 'cloudfront_ok_count' in df_show.columns and i_col_block in df_show.columns:
+                # % Bloqueado (Blocked IMPs vs cloudfront_ok_count)
                 df_show[col_pct_calc] = (df_show[i_col_block] / df_show['cloudfront_ok_count'] * 100).fillna(0)
                 df_show[col_pct_calc] = df_show[col_pct_calc].replace([np.inf, -np.inf], 0).round(2)
+                
+                # Tráfico en AF (Resta de OK Count - Blocked)
+                df_show[col_trafico_af] = df_show['cloudfront_ok_count'] - df_show[i_col_block]
 
-            # NUEVO %Correcto Maquinillo (cloudfront_ok_count vs Aftrad IMPs)
+            # %Correcto Maquinillo (cloudfront_ok_count vs Aftrad IMPs)
             if 'cloudfront_ok_count' in df_show.columns and i_col_imps in df_show.columns:
                 df_show[col_pct_maq_calc] = (df_show['cloudfront_ok_count'] / df_show[i_col_imps] * 100).fillna(0)
                 df_show[col_pct_maq_calc] = df_show[col_pct_maq_calc].replace([np.inf, -np.inf], 0).round(2)
@@ -176,8 +180,9 @@ with tab_match:
             keys_existentes = [c for c in ['ADV', 'Agency', 'App ID / Template', 'PID'] if c in df_show.columns]
             columnas_finales = keys_existentes + avail_m_metrics + [i_col_imps, i_col_block]
             
-            # Añadimos los porcentajes si las columnas existen
+            # Añadimos las columnas calculadas si existen
             if 'cloudfront_ok_count' in df_show.columns and i_col_block in df_show.columns:
+                columnas_finales.append(col_trafico_af) # Se mostrará la resta primero
                 columnas_finales.append(col_pct_calc)
                 
             if 'cloudfront_ok_count' in df_show.columns and i_col_imps in df_show.columns:
