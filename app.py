@@ -56,18 +56,28 @@ with tab_match:
             df_i_match.columns = df_i_match.columns.str.strip()
             cols_im = df_i_match.columns.tolist()
 
-            # 2. Mapeos Seguros para el cruce
-            def find_col(keywords):
+            # 2. Mapeos Seguros para el cruce (Ivane)
+            def find_col_i(keywords):
                 for col in cols_im:
                     if any(k in col.lower() for k in keywords): return col
                 return cols_im[0]
 
-            i_col_pid = find_col(['pid', 'site'])
-            i_col_app = find_col(['app', 'bundle'])
-            i_col_agy = find_col(['agency', 'partner'])
-            i_col_adv = find_col(['adv', 'advertiser'])
-            i_col_imps = find_col(['aftrad imps', 'imps'])
-            i_col_block = find_col(['blocked imps', 'blocked'])
+            i_col_pid = find_col_i(['pid', 'site'])
+            i_col_app = find_col_i(['app', 'bundle'])
+            i_col_agy = find_col_i(['agency', 'partner'])
+            i_col_adv = find_col_i(['adv', 'advertiser'])
+            i_col_imps = find_col_i(['aftrad imps', 'imps'])
+            i_col_block = find_col_i(['blocked imps', 'blocked'])
+
+            # Búsqueda dinámica para Maquinillo (Actualizado para normalized_template)
+            def find_col_m(keywords):
+                for col in df_m_match.columns:
+                    if any(k in col for k in keywords): return col
+                return None
+
+            m_col_agy = find_col_m(['agency'])
+            m_col_app = find_col_m(['normalized_template', 'template', 'app', 'bundle'])
+            m_col_pid = find_col_m(['pid'])
 
             # 3. Métricas Maquinillo a cruzar
             m_metrics = ['cloudfront_ok_count', 'cloudfront_error_count', 'http_error_count', 'paced_count']
@@ -79,9 +89,9 @@ with tab_match:
 
             # 4. Agrupar, Renombrar Llaves y Estandarizar a Minúsculas
             map_m = {}
-            if 'agency' in df_m_match.columns: map_m['agency'] = 'Match_Agency'
-            if 'template' in df_m_match.columns: map_m['template'] = 'Match_App'
-            if 'pid' in df_m_match.columns: map_m['pid'] = 'Match_PID'
+            if m_col_agy: map_m[m_col_agy] = 'Match_Agency'
+            if m_col_app: map_m[m_col_app] = 'Match_App'
+            if m_col_pid: map_m[m_col_pid] = 'Match_PID'
             
             map_i = {
                 i_col_agy: 'Match_Agency',
@@ -158,15 +168,15 @@ with tab_match:
             # 7. CÁLCULOS (PORCENTAJES Y RESTAS)
             col_pct_calc = '% Bloqueado'
             col_pct_maq_calc = '%Correcto Maquinillo'
-            col_trafico_af = 'Trafico en AF' # <-- NUEVA COLUMNA
+            col_trafico_af = 'Trafico en AF'
             
             if 'cloudfront_ok_count' in df_show.columns and i_col_block in df_show.columns:
+                # Tráfico en AF (Resta de OK Count - Blocked)
+                df_show[col_trafico_af] = df_show['cloudfront_ok_count'] - df_show[i_col_block]
+                
                 # % Bloqueado (Blocked IMPs vs cloudfront_ok_count)
                 df_show[col_pct_calc] = (df_show[i_col_block] / df_show['cloudfront_ok_count'] * 100).fillna(0)
                 df_show[col_pct_calc] = df_show[col_pct_calc].replace([np.inf, -np.inf], 0).round(2)
-                
-                # Tráfico en AF (Resta de OK Count - Blocked)
-                df_show[col_trafico_af] = df_show['cloudfront_ok_count'] - df_show[i_col_block]
 
             # %Correcto Maquinillo (cloudfront_ok_count vs Aftrad IMPs)
             if 'cloudfront_ok_count' in df_show.columns and i_col_imps in df_show.columns:
@@ -182,7 +192,7 @@ with tab_match:
             
             # Añadimos las columnas calculadas si existen
             if 'cloudfront_ok_count' in df_show.columns and i_col_block in df_show.columns:
-                columnas_finales.append(col_trafico_af) # Se mostrará la resta primero
+                columnas_finales.append(col_trafico_af)
                 columnas_finales.append(col_pct_calc)
                 
             if 'cloudfront_ok_count' in df_show.columns and i_col_imps in df_show.columns:
@@ -194,6 +204,7 @@ with tab_match:
 
         except Exception as e:
             st.error(f"Error realizando el cruce de datos: {e}")
+            st.info("Revisa si tus archivos CSV tienen los nombres de las columnas correctos.")
     else:
         st.info("👈 Sube AMBOS archivos en la barra lateral para comenzar.")
 
